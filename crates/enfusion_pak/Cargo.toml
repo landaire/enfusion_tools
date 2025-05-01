@@ -1,0 +1,23 @@
+[package]
+name = "enfusion_pak"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "enfusion_pak"
+path = "src/main.rs"
+required-features = ["bin"]
+
+[dependencies]
+clap = { version = "4.5.37", features = ["derive"], optional = true }
+jiff = "0.2.10"
+kinded = "0.3.0"
+memmap2 = "0.9.5"
+thiserror = "2.0.12"
+variantly = "0.4.0"
+winnow = "0.7.7"
+color-eyre = { version = "0.6", optional = true }
+
+[features]
+default = []
+bin = ["dep:clap", "dep:color-eyre"]
