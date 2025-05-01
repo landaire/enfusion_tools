@@ -25,10 +25,9 @@ impl EnfusionToolsApp {
                                 .ok()
                                 .map(|mut file| std::io::read_to_string(&mut file));
 
-                            println!("{:?}", file_result);
-
                             if let Some(Ok(opened_file)) = file_result {
-                                self.opened_file = opened_file;
+                                self.internal.opened_file_text = opened_file;
+                                self.opened_file_path = Some(node.as_str().to_string());
                             }
                         }
                     } else {
@@ -41,8 +40,8 @@ impl EnfusionToolsApp {
     pub(crate) fn show_file_tree(&mut self, ctx: &egui::Context) {
         egui::SidePanel::left("file_listing").show(ctx, |ui| {
             ui.vertical(|ui| {
-                if !self.pak_files.is_empty() {
-                    let overlay_fs = VfsPath::new(OverlayFS::new(&self.pak_files));
+                if !self.internal.pak_files.is_empty() {
+                    let overlay_fs = VfsPath::new(OverlayFS::new(&self.internal.pak_files));
 
                     ScrollArea::both().show(ui, |ui| {
                         self.build_file_tree_node(overlay_fs, true, ui);

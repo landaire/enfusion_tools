@@ -8,22 +8,26 @@ use crate::{
     ui,
 };
 
+pub(crate) struct Internal {
+    inbox: egui_inbox::UiInbox<BackgroundTaskCompletion>,
+
+    task_queue: Option<mpsc::Sender<BackgroundTask>>,
+
+    pub(crate) pak_files: Vec<VfsPath>,
+
+    pub(crate) opened_file_text: String,
+}
+
 /// We derive Deserialize/Serialize so we can persist app state on shutdown.
 #[derive(serde::Deserialize, serde::Serialize)]
 #[serde(default)] // if we add new fields, give them default values when deserializing old state
 pub struct EnfusionToolsApp {
-    data_path: String,
+    pub(crate) data_path: String,
 
     #[serde(skip)]
-    inbox: egui_inbox::UiInbox<BackgroundTaskCompletion>,
+    pub(crate) internal: Internal,
 
-    #[serde(skip)]
-    task_queue: Option<mpsc::Sender<BackgroundTask>>,
-
-    #[serde(skip)]
-    pub(crate) pak_files: Vec<VfsPath>,
-
-    pub(crate) opened_file: String,
+    pub(crate) opened_file_path: Option<String>,
 }
 
 impl Default for EnfusionToolsApp {
@@ -33,10 +37,14 @@ impl Default for EnfusionToolsApp {
 
         Self {
             data_path: data_dir,
-            inbox,
-            task_queue: None,
-            pak_files: Vec::new(),
-            opened_file: "".to_string(),
+
+            internal: Internal {
+                inbox,
+                task_queue: None,
+                pak_files: Vec::new(),
+                opened_file_text: "".to_string(),
+            },
+            opened_file_path: None,
         }
     }
 }
@@ -55,7 +63,7 @@ impl EnfusionToolsApp {
             Default::default()
         };
 
-        let task_queue = start_background_thread(app.inbox.sender());
+        let task_queue = start_background_thread(app.internal.inbox.sender());
 
         let mut pak_files = Vec::new();
         for entry in std::fs::read_dir(&app.data_path).expect("failed to read dir") {
@@ -70,7 +78,7 @@ impl EnfusionToolsApp {
             .send(BackgroundTask::LoadPakFiles(pak_files))
             .expect("failed to send background task");
 
-        app.task_queue = Some(task_queue);
+        app.internal.task_queue = Some(task_queue);
 
         app
     }
@@ -84,16 +92,16 @@ impl eframe::App for EnfusionToolsApp {
 
     /// Called each time the UI needs repainting, which may be many times per second.
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        self.inbox.set_ctx(ctx);
+        self.internal.inbox.set_ctx(ctx);
 
-        while let Some(message) = self.inbox.read_without_ctx().next() {
+        while let Some(message) = self.internal.inbox.read_without_ctx().next() {
             println!("got a background message");
             match message {
                 BackgroundTaskCompletion::LoadPakFiles(files) => match files {
                     Ok(mut files) => {
-                        self.pak_files.clear();
-                        self.pak_files.push(VfsPath::new(MemoryFS::new()));
-                        self.pak_files.append(&mut files);
+                        self.internal.pak_files.clear();
+                        self.internal.pak_files.push(VfsPath::new(MemoryFS::new()));
+                        self.internal.pak_files.append(&mut files);
                     }
                     Err(e) => {
                         eprintln!("failed to load pak files: {:?}", e);
@@ -127,7 +135,7 @@ impl eframe::App for EnfusionToolsApp {
         self.show_file_tree(ctx);
 
         egui::CentralPanel::default().show(ctx, |ui| {
-            ui.text_edit_multiline(&mut self.opened_file);
+            ui.text_edit_multiline(&mut self.internal.opened_file_text);
         });
     }
 }
