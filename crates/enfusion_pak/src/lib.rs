@@ -1,5 +1,6 @@
 pub use parser::*;
-mod error;
+pub mod error;
+pub mod pak_vfs;
 mod parser;
 mod stream;
-pub mod vfs;
+pub use vfs;

@@ -1,5 +1,11 @@
-use std::fmt::Debug;
-use vfs::{FileSystem, VfsError, error::VfsErrorKind};
+use ouroboros::self_referencing;
+use std::{
+    fmt::Debug,
+    fs::File,
+    io::{Cursor, Read, Seek},
+    time::SystemTime,
+};
+use vfs::{FileSystem, SeekAndRead, VfsError, VfsMetadata, error::VfsErrorKind};
 
 use crate::{FileEntry, FileEntryMeta, PakFile};
 
@@ -16,7 +22,8 @@ impl<T> PakVfs<T> {
 
 impl<T> PakVfs<T>
 where
-    T: AsRef<PakFile> + AsRef<[u8]>,
+    T: std::ops::Deref,
+    T::Target: AsRef<PakFile> + AsRef<[u8]>,
 {
     pub fn entry_at(&self, path: &str) -> vfs::VfsResult<&FileEntry> {
         let pak: &PakFile = self.source.as_ref();
@@ -55,7 +62,8 @@ where
 
 impl<T> FileSystem for PakVfs<T>
 where
-    T: AsRef<PakFile> + AsRef<[u8]> + Sync + Send + Debug + 'static,
+    T: std::ops::Deref + Sync + Send + Debug + 'static,
+    T::Target: AsRef<PakFile> + AsRef<[u8]>,
 {
     fn read_dir(&self, path: &str) -> vfs::VfsResult<Box<dyn Iterator<Item = String> + Send>> {
         let entry = self.entry_at(path)?;
@@ -77,7 +85,39 @@ where
     }
 
     fn open_file(&self, path: &str) -> vfs::VfsResult<Box<dyn vfs::SeekAndRead + Send>> {
-        todo!()
+        let entry = self.entry_at(path)?;
+        let FileEntryMeta::File {
+            offset,
+            compressed_len,
+            decompressed_len,
+            compressed,
+            compression_level,
+            ..
+        } = entry.meta()
+        else {
+            return Err(VfsError::from(VfsErrorKind::NotSupported));
+        };
+
+        let mut data = Vec::with_capacity(*decompressed_len as usize);
+        let data_start = *offset as usize;
+        let data_end = data_start + *compressed_len as usize;
+
+        let source_slice: &[u8] = self.source.as_ref();
+        let mut source_range = &source_slice[data_start..data_end];
+        if *compressed != 0 {
+            let mut decoder = flate2::read::ZlibDecoder::new(source_range);
+            std::io::copy(&mut decoder, &mut data).map_err(|err| {
+                println!("error occurred during decompression: {:#?}", err);
+                println!("offset: {:#X?}", *offset);
+                VfsError::from(VfsErrorKind::IoError(err))
+            })?;
+
+            Ok(Box::new(Cursor::new(data)))
+        } else {
+            let _ = std::io::copy(&mut source_range, &mut data);
+
+            Ok(Box::new(Cursor::new(data)))
+        }
     }
 
     fn create_file(&self, path: &str) -> vfs::VfsResult<Box<dyn vfs::SeekAndWrite + Send>> {
@@ -89,7 +129,41 @@ where
     }
 
     fn metadata(&self, path: &str) -> vfs::VfsResult<vfs::VfsMetadata> {
-        todo!()
+        let entry = self.entry_at(path)?;
+
+        let pak_meta = entry.meta();
+        let meta = match pak_meta {
+            FileEntryMeta::Folder { children } => VfsMetadata {
+                file_type: vfs::VfsFileType::Directory,
+                len: 0,
+                created: None,
+                modified: None,
+                accessed: None,
+            },
+            FileEntryMeta::File {
+                offset,
+                compressed_len,
+                decompressed_len,
+                unk,
+                unk2,
+                compressed,
+                compression_level,
+                timestamp,
+            } => {
+                // let converted_timestamp = pak_meta.parsed_timestamp().map(|ts| {
+                //     SystemTime::fr
+                // })
+                VfsMetadata {
+                    file_type: vfs::VfsFileType::File,
+                    len: *decompressed_len as u64,
+                    created: None,
+                    modified: None,
+                    accessed: None,
+                }
+            }
+        };
+
+        Ok(meta)
     }
 
     fn exists(&self, path: &str) -> vfs::VfsResult<bool> {

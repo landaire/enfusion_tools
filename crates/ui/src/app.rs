@@ -1,11 +1,43 @@
+use std::{ffi::OsStr, sync::mpsc};
+
+use egui::gui_zoom::kb_shortcuts;
+use enfusion_pak::vfs::{MemoryFS, VfsPath};
+
+use crate::{
+    task::{BackgroundTask, BackgroundTaskCompletion, WrappedPakFile, start_background_thread},
+    ui,
+};
+
 /// We derive Deserialize/Serialize so we can persist app state on shutdown.
 #[derive(serde::Deserialize, serde::Serialize)]
 #[serde(default)] // if we add new fields, give them default values when deserializing old state
-pub struct EnfusionToolsApp {}
+pub struct EnfusionToolsApp {
+    data_path: String,
+
+    #[serde(skip)]
+    inbox: egui_inbox::UiInbox<BackgroundTaskCompletion>,
+
+    #[serde(skip)]
+    task_queue: Option<mpsc::Sender<BackgroundTask>>,
+
+    #[serde(skip)]
+    pub(crate) pak_files: Vec<VfsPath>,
+
+    pub(crate) opened_file: String,
+}
 
 impl Default for EnfusionToolsApp {
     fn default() -> Self {
-        Self {}
+        let data_dir = r#"D:\SteamLibrary\steamapps\common\Arma Reforger\addons\data"#.to_string();
+        let inbox = egui_inbox::UiInbox::new();
+
+        Self {
+            data_path: data_dir,
+            inbox,
+            task_queue: None,
+            pak_files: Vec::new(),
+            opened_file: "".to_string(),
+        }
     }
 }
 
@@ -17,11 +49,30 @@ impl EnfusionToolsApp {
 
         // Load previous app state (if any).
         // Note that you must enable the `persistence` feature for this to work.
-        if let Some(storage) = cc.storage {
-            return eframe::get_value(storage, eframe::APP_KEY).unwrap_or_default();
+        let mut app: EnfusionToolsApp = if let Some(storage) = cc.storage {
+            eframe::get_value(storage, eframe::APP_KEY).unwrap_or_default()
+        } else {
+            Default::default()
+        };
+
+        let task_queue = start_background_thread(app.inbox.sender());
+
+        let mut pak_files = Vec::new();
+        for entry in std::fs::read_dir(&app.data_path).expect("failed to read dir") {
+            let entry = entry.expect("could not get entry");
+            let path = entry.path();
+            if let Some("pak") = path.extension().and_then(OsStr::to_str) {
+                pak_files.push(path);
+            }
         }
 
-        Default::default()
+        task_queue
+            .send(BackgroundTask::LoadPakFiles(pak_files))
+            .expect("failed to send background task");
+
+        app.task_queue = Some(task_queue);
+
+        app
     }
 }
 
@@ -33,6 +84,24 @@ impl eframe::App for EnfusionToolsApp {
 
     /// Called each time the UI needs repainting, which may be many times per second.
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.inbox.set_ctx(ctx);
+
+        while let Some(message) = self.inbox.read_without_ctx().next() {
+            println!("got a background message");
+            match message {
+                BackgroundTaskCompletion::LoadPakFiles(files) => match files {
+                    Ok(mut files) => {
+                        self.pak_files.clear();
+                        self.pak_files.push(VfsPath::new(MemoryFS::new()));
+                        self.pak_files.append(&mut files);
+                    }
+                    Err(e) => {
+                        eprintln!("failed to load pak files: {:?}", e);
+                    }
+                },
+            }
+        }
+
         // Put your widgets into a `SidePanel`, `TopBottomPanel`, `CentralPanel`, `Window` or `Area`.
         // For inspiration and more examples, go to https://emilk.github.io/egui
 
@@ -55,9 +124,11 @@ impl eframe::App for EnfusionToolsApp {
             });
         });
 
-        egui::SidePanel::left("file_listing").show(ctx, |ui| {});
+        self.show_file_tree(ctx);
 
-        egui::CentralPanel::default().show(ctx, |ui| {});
+        egui::CentralPanel::default().show(ctx, |ui| {
+            ui.text_edit_multiline(&mut self.opened_file);
+        });
     }
 }
 

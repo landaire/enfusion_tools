@@ -6,7 +6,7 @@ use std::{
 };
 
 use clap::Parser;
-use enfusion_pak::{Chunk, FileEntry, FileEntryMeta, PakFile, vfs::PakVfs};
+use enfusion_pak::{Chunk, FileEntry, FileEntryMeta, PakFile, pak_vfs::PakVfs};
 use humansize::{BINARY, format_size};
 use memmap2::Mmap;
 use vfs::{FileSystem, MemoryFS, OverlayFS, VfsPath};
