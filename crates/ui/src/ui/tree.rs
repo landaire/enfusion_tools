@@ -9,8 +9,6 @@ use itertools::Itertools;
 
 use crate::EnfusionToolsApp;
 
-pub fn show_file_tree(ui: &mut Ui) {}
-
 impl EnfusionToolsApp {
     fn build_file_tree_node(&mut self, node: VfsPath, open: bool, ui: &mut Ui) {
         let header = CollapsingHeader::new(node.filename()).default_open(open).show(ui, |ui| {
@@ -40,10 +38,10 @@ impl EnfusionToolsApp {
         egui::SidePanel::left("file_listing").show(ctx, |ui| {
             ui.vertical(|ui| {
                 if !self.internal.pak_files.is_empty() {
-                    let overlay_fs = VfsPath::new(OverlayFS::new(&self.internal.pak_files));
-
                     ScrollArea::both().show(ui, |ui| {
-                        self.build_file_tree_node(overlay_fs, true, ui);
+                        if let Some(overlay_fs) = self.internal.overlay_fs.clone() {
+                            self.build_file_tree_node(overlay_fs, true, ui);
+                        }
                     });
                 }
             })

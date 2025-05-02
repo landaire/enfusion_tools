@@ -3592,6 +3592,7 @@ dependencies = [
  "itertools",
  "log",
  "memmap2",
+ "regex",
  "rfd",
  "serde",
  "wasm-bindgen-futures",

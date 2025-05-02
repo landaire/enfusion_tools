@@ -5,18 +5,21 @@ use egui_code_editor::CodeEditor;
 use egui_code_editor::ColorTheme;
 use egui_code_editor::Syntax;
 use enfusion_pak::vfs::MemoryFS;
+use enfusion_pak::vfs::OverlayFS;
 use enfusion_pak::vfs::VfsPath;
 
 use crate::task::BackgroundTask;
-use crate::task::BackgroundTaskCompletion;
+use crate::task::BackgroundTaskMessage;
 use crate::task::start_background_thread;
 
 pub(crate) struct Internal {
-    inbox: egui_inbox::UiInbox<BackgroundTaskCompletion>,
+    inbox: egui_inbox::UiInbox<BackgroundTaskMessage>,
 
     task_queue: Option<mpsc::Sender<BackgroundTask>>,
 
     pub(crate) pak_files: Vec<VfsPath>,
+
+    pub(crate) overlay_fs: Option<VfsPath>,
 
     pub(crate) opened_file_text: String,
 }
@@ -31,6 +34,8 @@ pub struct EnfusionToolsApp {
     pub(crate) internal: Internal,
 
     pub(crate) opened_file_path: Option<String>,
+
+    pub(crate) search_query: String,
 }
 
 impl Default for EnfusionToolsApp {
@@ -45,9 +50,11 @@ impl Default for EnfusionToolsApp {
                 inbox,
                 task_queue: None,
                 pak_files: Vec::new(),
+                overlay_fs: None,
                 opened_file_text: "".to_string(),
             },
             opened_file_path: None,
+            search_query: "".to_string(),
         }
     }
 }
@@ -98,18 +105,28 @@ impl eframe::App for EnfusionToolsApp {
         self.internal.inbox.set_ctx(ctx);
 
         while let Some(message) = self.internal.inbox.read_without_ctx().next() {
-            println!("got a background message");
             match message {
-                BackgroundTaskCompletion::LoadPakFiles(files) => match files {
+                BackgroundTaskMessage::LoadPakFiles(files) => match files {
                     Ok(mut files) => {
                         self.internal.pak_files.clear();
                         self.internal.pak_files.push(VfsPath::new(MemoryFS::new()));
                         self.internal.pak_files.append(&mut files);
+
+                        self.internal.overlay_fs =
+                            Some(VfsPath::new(OverlayFS::new(self.internal.pak_files.as_slice())));
                     }
                     Err(e) => {
                         eprintln!("failed to load pak files: {:?}", e);
                     }
                 },
+                BackgroundTaskMessage::SearchResult(search_rx) => {
+                    self.internal.opened_file_text += search_rx.file.as_str();
+                    for m in search_rx.matches {
+                        self.internal.opened_file_text += &m;
+                        self.internal.opened_file_text += "...";
+                    }
+                    self.internal.opened_file_text += "\n";
+                }
             }
         }
 
@@ -138,16 +155,31 @@ impl eframe::App for EnfusionToolsApp {
         self.show_file_tree(ctx);
 
         egui::CentralPanel::default().show(ctx, |ui| {
-            let widget = CodeEditor::default()
-                .id_source("code editor")
-                .with_rows(12)
-                .with_fontsize(14.0)
-                .with_theme(ColorTheme::GRUVBOX)
-                .with_syntax(Syntax::rust())
-                .with_numlines(true)
-                .vscroll(true)
-                .auto_shrink(false)
-                .show(ui, &mut self.internal.opened_file_text);
+            ui.vertical(|ui| {
+                ui.horizontal(|ui| {
+                    ui.label("Search");
+                    if ui.text_edit_singleline(&mut self.search_query).changed() {
+                        if let Some(task_queue) = &self.internal.task_queue {
+                            if let Some(vfs_root) = self.internal.overlay_fs.clone() {
+                                task_queue.send(BackgroundTask::PerformSearch(
+                                    vfs_root,
+                                    self.search_query.clone(),
+                                ));
+                            }
+                        }
+                    }
+                });
+                let widget = CodeEditor::default()
+                    .id_source("code editor")
+                    .with_rows(12)
+                    .with_fontsize(14.0)
+                    .with_theme(ColorTheme::GRUVBOX)
+                    .with_syntax(Syntax::rust())
+                    .with_numlines(true)
+                    .vscroll(true)
+                    .auto_shrink(false)
+                    .show(ui, &mut self.internal.opened_file_text);
+            });
 
             // ui.add_sized(ui.available_size(), widget)
             // ui.text_edit_multiline(&mut self.internal.opened_file_text);
