@@ -1,10 +1,12 @@
-use std::{
-    path::PathBuf,
-    sync::{Arc, mpsc},
-};
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::mpsc;
 
 use egui_inbox::UiInboxSender;
-use enfusion_pak::{PakFile, error::PakError, pak_vfs::PakVfs, vfs::VfsPath};
+use enfusion_pak::PakFile;
+use enfusion_pak::error::PakError;
+use enfusion_pak::pak_vfs::PakVfs;
+use enfusion_pak::vfs::VfsPath;
 use memmap2::Mmap;
 
 #[derive(Debug)]
@@ -42,11 +44,7 @@ fn parse_pak_file(path: PathBuf) -> Result<WrappedPakFile, PakError> {
 
     let parsed_pak = enfusion_pak::PakFile::parse(&mmap)?;
 
-    Ok(WrappedPakFile {
-        path,
-        source: mmap,
-        pak_file: parsed_pak,
-    })
+    Ok(WrappedPakFile { path, source: mmap, pak_file: parsed_pak })
 }
 
 pub fn start_background_thread(

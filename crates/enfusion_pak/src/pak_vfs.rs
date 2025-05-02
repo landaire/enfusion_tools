@@ -1,10 +1,13 @@
-use std::{
-    fmt::Debug,
-    io::Cursor,
-};
-use vfs::{FileSystem, VfsError, VfsMetadata, error::VfsErrorKind};
+use std::fmt::Debug;
+use std::io::Cursor;
+use vfs::FileSystem;
+use vfs::VfsError;
+use vfs::VfsMetadata;
+use vfs::error::VfsErrorKind;
 
-use crate::{FileEntry, FileEntryMeta, PakFile};
+use crate::FileEntry;
+use crate::FileEntryMeta;
+use crate::PakFile;
 
 #[derive(Debug)]
 pub struct PakVfs<T> {
@@ -83,14 +86,8 @@ where
 
     fn open_file(&self, path: &str) -> vfs::VfsResult<Box<dyn vfs::SeekAndRead + Send>> {
         let entry = self.entry_at(path)?;
-        let FileEntryMeta::File {
-            offset,
-            compressed_len,
-            decompressed_len,
-            compressed,
-            
-            ..
-        } = entry.meta()
+        let FileEntryMeta::File { offset, compressed_len, decompressed_len, compressed, .. } =
+            entry.meta()
         else {
             return Err(VfsError::from(VfsErrorKind::NotSupported));
         };

@@ -2,12 +2,19 @@ use std::ops::Range;
 
 use crate::error::PakError;
 use jiff::civil::DateTime;
-use kinded::{Kind, Kinded};
+use kinded::Kind;
+use kinded::Kinded;
 use variantly::Variantly;
-use winnow::binary::{be_u32, le_u16, le_u32, u8};
+use winnow::LocatingSlice;
+use winnow::Parser;
+use winnow::Partial;
+use winnow::Result as WResult;
+use winnow::binary::be_u32;
+use winnow::binary::le_u16;
+use winnow::binary::le_u32;
+use winnow::binary::u8;
 use winnow::stream::Location;
 use winnow::token::take;
-use winnow::{LocatingSlice, Parser, Partial, Result as WResult};
 
 #[derive(Debug, Clone)]
 pub struct FileEntry {
@@ -29,24 +36,17 @@ impl FileEntry {
     }
 
     pub fn merge(&mut self, other: Self) {
-        let FileEntryMeta::Folder {
-            children: self_children,
-        } = &mut self.meta
-        else {
+        let FileEntryMeta::Folder { children: self_children } = &mut self.meta else {
             panic!("merge should only be called on directories");
         };
 
-        let FileEntryMeta::Folder {
-            children: other_children,
-        } = other.meta
-        else {
+        let FileEntryMeta::Folder { children: other_children } = other.meta else {
             panic!("merge should only be called on directories");
         };
 
         for other_child in other_children {
-            if let Some(self_child) = self_children
-                .iter_mut()
-                .find(|self_child| self_child.name == other_child.name)
+            if let Some(self_child) =
+                self_children.iter_mut().find(|self_child| self_child.name == other_child.name)
             {
                 if other_child.kind() == FileEntryKind::File {
                     println!("{:#?}, {:#?}", self_child, other_child);
@@ -163,20 +163,10 @@ pub enum PakType {
 
 #[derive(Debug, Kinded, Variantly)]
 pub enum Chunk {
-    Form {
-        file_size: u32,
-        pak_file_type: PakType,
-    },
-    Head {
-        version: u32,
-        header_data: Range<usize>,
-    },
-    Data {
-        data: Range<usize>,
-    },
-    File {
-        fs: FileEntry,
-    },
+    Form { file_size: u32, pak_file_type: PakType },
+    Head { version: u32, header_data: Range<usize> },
+    Data { data: Range<usize> },
+    File { fs: FileEntry },
     Unknown(u32),
 }
 
@@ -228,13 +218,7 @@ fn parse_form_chunk(input: &mut LocatingSlice<Partial<&[u8]>>) -> WResult<(usize
             panic!("unknown pak type: {:?}", unk);
         }
     };
-    Ok((
-        0,
-        Chunk::Form {
-            file_size,
-            pak_file_type,
-        },
-    ))
+    Ok((0, Chunk::Form { file_size, pak_file_type }))
 }
 
 fn parse_head_chunk(input: &mut LocatingSlice<Partial<&[u8]>>) -> WResult<(usize, Chunk)> {
@@ -249,10 +233,7 @@ fn parse_head_chunk(input: &mut LocatingSlice<Partial<&[u8]>>) -> WResult<(usize
 
     let header_range = (header_start + skip_bytes)..(header_start + header_len);
 
-    let chunk = Chunk::Head {
-        version,
-        header_data: header_range,
-    };
+    let chunk = Chunk::Head { version, header_data: header_range };
 
     Ok((header_len - skip_bytes, chunk))
 }
@@ -263,9 +244,7 @@ fn parse_data_chunk(input: &mut LocatingSlice<Partial<&[u8]>>) -> WResult<(usize
     let data_start = input.current_token_start();
     //take(data_len).void().parse_next(input)?;
 
-    let chunk = Chunk::Data {
-        data: data_start..(data_start + data_len),
-    };
+    let chunk = Chunk::Data { data: data_start..(data_start + data_len) };
 
     Ok((data_len, chunk))
 }
@@ -280,12 +259,7 @@ fn parse_file_entry(input: &mut &[u8]) -> WResult<(FileEntry, usize)> {
     let (meta, children) = match entry_kind {
         FileEntryKind::Folder => {
             let children_count = le_u32(input)?;
-            (
-                FileEntryMeta::Folder {
-                    children: Default::default(),
-                },
-                children_count as usize,
-            )
+            (FileEntryMeta::Folder { children: Default::default() }, children_count as usize)
         }
         FileEntryKind::File => {
             let offset = le_u32(input)?;
@@ -363,9 +337,8 @@ fn parse_file_chunk(input: &mut LocatingSlice<Partial<&[u8]>>) -> WResult<(usize
         while let Some(dir) =
             parents.pop_if(|parent| parent.children_remaining == 0 && !parent.is_root)
         {
-            let parent = parents
-                .last_mut()
-                .expect("expected a folder to have a parent, but there is none");
+            let parent =
+                parents.last_mut().expect("expected a folder to have a parent, but there is none");
 
             parent.children_remaining = parent
                 .children_remaining
@@ -378,9 +351,7 @@ fn parse_file_chunk(input: &mut LocatingSlice<Partial<&[u8]>>) -> WResult<(usize
 
     assert_eq!(parents.len(), 1);
 
-    let chunk = Chunk::File {
-        fs: parents.pop().expect("no parents?").entry,
-    };
+    let chunk = Chunk::File { fs: parents.pop().expect("no parents?").entry };
 
     Ok((0, chunk))
 }

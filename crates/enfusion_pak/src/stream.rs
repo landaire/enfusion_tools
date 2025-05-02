@@ -1,6 +1,10 @@
 use std::fmt::Debug;
 
-use winnow::stream::{Location, Offset, SliceLen, Stream, StreamIsPartial};
+use winnow::stream::Location;
+use winnow::stream::Offset;
+use winnow::stream::SliceLen;
+use winnow::stream::Stream;
+use winnow::stream::StreamIsPartial;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct SkippableStream<I> {

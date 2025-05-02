@@ -1,9 +1,15 @@
-use std::{ffi::OsStr, sync::mpsc};
+use std::ffi::OsStr;
+use std::sync::mpsc;
 
-use egui_code_editor::{CodeEditor, ColorTheme, Syntax};
-use enfusion_pak::vfs::{MemoryFS, VfsPath};
+use egui_code_editor::CodeEditor;
+use egui_code_editor::ColorTheme;
+use egui_code_editor::Syntax;
+use enfusion_pak::vfs::MemoryFS;
+use enfusion_pak::vfs::VfsPath;
 
-use crate::task::{BackgroundTask, BackgroundTaskCompletion, start_background_thread};
+use crate::task::BackgroundTask;
+use crate::task::BackgroundTaskCompletion;
+use crate::task::start_background_thread;
 
 pub(crate) struct Internal {
     inbox: egui_inbox::UiInbox<BackgroundTaskCompletion>,
@@ -155,10 +161,7 @@ fn powered_by_egui_and_eframe(ui: &mut egui::Ui) {
         ui.label("Powered by ");
         ui.hyperlink_to("egui", "https://github.com/emilk/egui");
         ui.label(" and ");
-        ui.hyperlink_to(
-            "eframe",
-            "https://github.com/emilk/egui/tree/master/crates/eframe",
-        );
+        ui.hyperlink_to("eframe", "https://github.com/emilk/egui/tree/master/crates/eframe");
         ui.label(".");
     });
 }

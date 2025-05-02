@@ -35,10 +35,7 @@ fn main() {
     let web_options = eframe::WebOptions::default();
 
     wasm_bindgen_futures::spawn_local(async {
-        let document = web_sys::window()
-            .expect("No window")
-            .document()
-            .expect("No document");
+        let document = web_sys::window().expect("No window").document().expect("No document");
 
         let canvas = document
             .get_element_by_id("the_canvas_id")
@@ -47,11 +44,7 @@ fn main() {
             .expect("the_canvas_id was not a HtmlCanvasElement");
 
         let start_result = eframe::WebRunner::new()
-            .start(
-                canvas,
-                web_options,
-                Box::new(|cc| Ok(Box::new(ui::EnfusionToolsApp::new(cc)))),
-            )
+            .start(canvas, web_options, Box::new(|cc| Ok(Box::new(ui::EnfusionToolsApp::new(cc)))))
             .await;
 
         // Remove the loading text and spinner:

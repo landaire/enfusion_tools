@@ -1,15 +1,22 @@
-use std::{
-    collections::VecDeque,
-    ffi::OsStr,
-    path::{Path, PathBuf},
-    rc::Rc,
-};
+use std::collections::VecDeque;
+use std::ffi::OsStr;
+use std::path::Path;
+use std::path::PathBuf;
+use std::rc::Rc;
 
 use clap::Parser;
-use enfusion_pak::{Chunk, FileEntry, FileEntryMeta, PakFile, pak_vfs::PakVfs};
-use humansize::{BINARY, format_size};
+use enfusion_pak::Chunk;
+use enfusion_pak::FileEntry;
+use enfusion_pak::FileEntryMeta;
+use enfusion_pak::PakFile;
+use enfusion_pak::pak_vfs::PakVfs;
+use humansize::BINARY;
+use humansize::format_size;
 use memmap2::Mmap;
-use vfs::{FileSystem, MemoryFS, OverlayFS, VfsPath};
+use vfs::FileSystem;
+use vfs::MemoryFS;
+use vfs::OverlayFS;
+use vfs::VfsPath;
 
 /// Simple program to greet a person
 #[derive(Parser, Debug)]
@@ -54,18 +61,12 @@ fn parse_pak_files<P: AsRef<Path>>(files: &[P], args: &Args) -> color_eyre::Resu
         let mmap = unsafe { memmap2::Mmap::map(&file)? };
 
         let pak_file = PakFile::parse(&mmap)?;
-        parsed_files.push(WrappedPakFile {
-            path: file_path.to_path_buf(),
-            source: mmap,
-            pak_file,
-        });
+        parsed_files.push(WrappedPakFile { path: file_path.to_path_buf(), source: mmap, pak_file });
     }
 
     if args.merged {
-        let mut merged_file = if let Some(i) = parsed_files
-            .iter()
-            .rev()
-            .position(|file| file.pak_file.file_chunk().is_some())
+        let mut merged_file = if let Some(i) =
+            parsed_files.iter().rev().position(|file| file.pak_file.file_chunk().is_some())
         {
             parsed_files.remove(i)
         } else {
@@ -116,15 +117,10 @@ fn print_pak_file_chunk_details(fs: &FileEntry, path: Option<&Path>, args: &Args
         match meta {
             FileEntryMeta::Folder { children } => {
                 if children.is_empty() {
-                    println!(
-                        "\t{}",
-                        this_path.to_str().expect("failed to convert path to str")
-                    );
+                    println!("\t{}", this_path.to_str().expect("failed to convert path to str"));
                 }
 
-                children
-                    .iter()
-                    .for_each(|child| fs_queue.push_back((this_path.clone(), child)));
+                children.iter().for_each(|child| fs_queue.push_back((this_path.clone(), child)));
             }
             FileEntryMeta::File {
                 offset,
@@ -136,10 +132,7 @@ fn print_pak_file_chunk_details(fs: &FileEntry, path: Option<&Path>, args: &Args
                 compression_level,
                 timestamp,
             } => {
-                println!(
-                    "\t{}",
-                    this_path.to_str().expect("failed to convert path to str")
-                );
+                println!("\t{}", this_path.to_str().expect("failed to convert path to str"));
 
                 if args.long {
                     println!("\t\tOffset: {:#X}", *offset);
@@ -174,30 +167,16 @@ fn print_pak_file(pak_file: &PakFile, args: &Args) -> color_eyre::Result<()> {
     for chunk in pak_file.chunks() {
         println!("Chunk {:?}", chunk.kind());
         match chunk {
-            Chunk::Form {
-                file_size,
-                pak_file_type,
-            } => {
-                println!(
-                    "\tSize: {} ({} bytes)",
-                    format_size(*file_size, BINARY),
-                    *file_size
-                );
+            Chunk::Form { file_size, pak_file_type } => {
+                println!("\tSize: {} ({} bytes)", format_size(*file_size, BINARY), *file_size);
                 println!("\tVersion: {:?}", *pak_file_type);
             }
-            Chunk::Head {
-                version,
-                header_data,
-            } => {
+            Chunk::Head { version, header_data } => {
                 println!("\tVersion: {:#X}", *version);
                 println!("\tUnknown Data Len: {} bytes", header_data.len());
             }
             Chunk::Data { data } => {
-                println!(
-                    "\tSize: {} ({} bytes)",
-                    format_size(data.len(), BINARY),
-                    data.len()
-                );
+                println!("\tSize: {} ({} bytes)", format_size(data.len(), BINARY), data.len());
             }
             Chunk::File { fs } => {
                 print_pak_file_chunk_details(fs, None, args);
