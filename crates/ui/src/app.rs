@@ -1,13 +1,9 @@
 use std::{ffi::OsStr, sync::mpsc};
 
-use egui::gui_zoom::kb_shortcuts;
 use egui_code_editor::{CodeEditor, ColorTheme, Syntax};
 use enfusion_pak::vfs::{MemoryFS, VfsPath};
 
-use crate::{
-    task::{BackgroundTask, BackgroundTaskCompletion, WrappedPakFile, start_background_thread},
-    ui,
-};
+use crate::task::{BackgroundTask, BackgroundTaskCompletion, start_background_thread};
 
 pub(crate) struct Internal {
     inbox: egui_inbox::UiInbox<BackgroundTaskCompletion>,

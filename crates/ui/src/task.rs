@@ -1,5 +1,4 @@
 use std::{
-    io::{Cursor, Read, Seek},
     path::PathBuf,
     sync::{Arc, mpsc},
 };

@@ -1,11 +1,8 @@
-use ouroboros::self_referencing;
 use std::{
     fmt::Debug,
-    fs::File,
-    io::{Cursor, Read, Seek},
-    time::SystemTime,
+    io::Cursor,
 };
-use vfs::{FileSystem, SeekAndRead, VfsError, VfsMetadata, error::VfsErrorKind};
+use vfs::{FileSystem, VfsError, VfsMetadata, error::VfsErrorKind};
 
 use crate::{FileEntry, FileEntryMeta, PakFile};
 
@@ -91,7 +88,7 @@ where
             compressed_len,
             decompressed_len,
             compressed,
-            compression_level,
+            
             ..
         } = entry.meta()
         else {

@@ -1,19 +1,10 @@
-use std::borrow::Cow;
-use std::cell::RefCell;
-use std::collections::{HashMap, VecDeque};
 use std::ops::Range;
-use std::path::PathBuf;
-use std::rc::{self, Rc};
-use std::{panic::PanicHookInfo, path::Path};
 
 use crate::error::PakError;
-use crate::stream::SkippableStream;
 use jiff::civil::DateTime;
 use kinded::{Kind, Kinded};
 use variantly::Variantly;
 use winnow::binary::{be_u32, le_u16, le_u32, u8};
-use winnow::combinator::alt;
-use winnow::error::ContextError;
 use winnow::stream::Location;
 use winnow::token::take;
 use winnow::{LocatingSlice, Parser, Partial, Result as WResult};
