@@ -1,6 +1,7 @@
 use std::{ffi::OsStr, sync::mpsc};
 
 use egui::gui_zoom::kb_shortcuts;
+use egui_code_editor::{CodeEditor, ColorTheme, Syntax};
 use enfusion_pak::vfs::{MemoryFS, VfsPath};
 
 use crate::{
@@ -135,7 +136,19 @@ impl eframe::App for EnfusionToolsApp {
         self.show_file_tree(ctx);
 
         egui::CentralPanel::default().show(ctx, |ui| {
-            ui.text_edit_multiline(&mut self.internal.opened_file_text);
+            let widget = CodeEditor::default()
+                .id_source("code editor")
+                .with_rows(12)
+                .with_fontsize(14.0)
+                .with_theme(ColorTheme::GRUVBOX)
+                .with_syntax(Syntax::rust())
+                .with_numlines(true)
+                .vscroll(true)
+                .auto_shrink(false)
+                .show(ui, &mut self.internal.opened_file_text);
+
+            // ui.add_sized(ui.available_size(), widget)
+            // ui.text_edit_multiline(&mut self.internal.opened_file_text);
         });
     }
 }

@@ -1171,6 +1171,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "egui_code_editor"
+version = "0.2.13"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "44af86a3602f15ca0620fcbb3803780ea1df1084f74886b4ce70489a1a0571e2"
+dependencies = [
+ "egui",
+]
+
+[[package]]
 name = "egui_glow"
 version = "0.31.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3576,6 +3585,7 @@ version = "0.1.0"
 dependencies = [
  "eframe",
  "egui",
+ "egui_code_editor",
  "egui_inbox",
  "enfusion_pak",
  "env_logger",
