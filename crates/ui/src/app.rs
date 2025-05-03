@@ -123,7 +123,7 @@ impl eframe::App for EnfusionToolsApp {
                     self.internal.opened_file_text += search_rx.file.as_str();
                     for m in search_rx.matches {
                         self.internal.opened_file_text += &m;
-                        self.internal.opened_file_text += "...";
+                        self.internal.opened_file_text += "\n...";
                     }
                     self.internal.opened_file_text += "\n";
                 }
