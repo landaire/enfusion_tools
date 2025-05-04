@@ -1,4 +1,3 @@
-use std::ffi::OsStr;
 use std::sync::mpsc;
 
 use egui_code_editor::CodeEditor;
@@ -95,7 +94,7 @@ impl EnfusionToolsApp {
             for entry in std::fs::read_dir(&app.data_path).expect("failed to read dir") {
                 let entry = entry.expect("could not get entry");
                 let path = entry.path();
-                if let Some("pak") = path.extension().and_then(OsStr::to_str) {
+                if let Some("pak") = path.extension().and_then(std::ffi::OsStr::to_str) {
                     pak_files.push(FileReference(path));
                 }
             }
@@ -114,7 +113,7 @@ impl EnfusionToolsApp {
     pub fn process_background_message(&mut self, message: BackgroundTaskMessage) {
         match message {
             BackgroundTaskMessage::LoadedPakFiles(files) => match files {
-                Ok(mut files) => {
+                Ok(files) => {
                     self.internal.pak_files.clear();
                     self.internal.pak_files.push(VfsPath::new(MemoryFS::new()));
 
@@ -144,7 +143,7 @@ impl EnfusionToolsApp {
                 }
                 self.internal.opened_file_text += "\n";
             }
-            BackgroundTaskMessage::FileDataLoaded(async_vfs_path, items) => {
+            BackgroundTaskMessage::FileDataLoaded(_, items) => {
                 // Try reading this as text
                 let Ok(str_data) = String::from_utf8(items) else {
                     return;
@@ -247,7 +246,7 @@ impl eframe::App for EnfusionToolsApp {
                         }
                     }
                 });
-                let widget = CodeEditor::default()
+                CodeEditor::default()
                     .id_source("code editor")
                     .with_rows(12)
                     .with_fontsize(14.0)
@@ -265,13 +264,13 @@ impl eframe::App for EnfusionToolsApp {
     }
 }
 
-fn powered_by_egui_and_eframe(ui: &mut egui::Ui) {
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 0.0;
-        ui.label("Powered by ");
-        ui.hyperlink_to("egui", "https://github.com/emilk/egui");
-        ui.label(" and ");
-        ui.hyperlink_to("eframe", "https://github.com/emilk/egui/tree/master/crates/eframe");
-        ui.label(".");
-    });
-}
+// fn powered_by_egui_and_eframe(ui: &mut egui::Ui) {
+//     ui.horizontal(|ui| {
+//         ui.spacing_mut().item_spacing.x = 0.0;
+//         ui.label("Powered by ");
+//         ui.hyperlink_to("egui", "https://github.com/emilk/egui");
+//         ui.label(" and ");
+//         ui.hyperlink_to("eframe", "https://github.com/emilk/egui/tree/master/crates/eframe");
+//         ui.label(".");
+//     });
+// }

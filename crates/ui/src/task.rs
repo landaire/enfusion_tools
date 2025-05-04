@@ -2,8 +2,6 @@ use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::collections::VecDeque;
 use std::ops::Range;
-use std::ops::RangeBounds;
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
@@ -11,17 +9,12 @@ use std::sync::mpsc;
 use std::sync::mpsc::Receiver;
 
 use egui_inbox::UiInboxSender;
-use enfusion_pak::PakFile;
 use enfusion_pak::error::PakError;
 use enfusion_pak::pak_vfs::PakVfs;
 use enfusion_pak::vfs::VfsPath;
-use enfusion_pak::vfs::async_vfs::AsyncFileSystem;
-use enfusion_pak::vfs::async_vfs::AsyncOverlayFS;
 use enfusion_pak::vfs::async_vfs::AsyncVfsPath;
-use enfusion_pak::vfs::async_vfs::impls::overlay;
 use futures::StreamExt;
 use log::debug;
-use regex::Regex;
 
 use crate::pak_wrapper::WrappedPakFile;
 use crate::pak_wrapper::parse_pak_file;
@@ -200,7 +193,7 @@ unsafe impl Sync for FileReference {}
 #[cfg(not(target_arch = "wasm32"))]
 #[repr(transparent)]
 #[derive(Clone, Debug)]
-pub struct FileReference(pub PathBuf);
+pub struct FileReference(pub std::path::PathBuf);
 
 pub fn start_background_thread(
     inbox: UiInboxSender<BackgroundTaskMessage>,

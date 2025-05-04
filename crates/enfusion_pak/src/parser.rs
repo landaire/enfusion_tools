@@ -2,11 +2,9 @@ use std::ops::Range;
 
 use crate::error::PakError;
 use jiff::civil::DateTime;
-use kinded::Kind;
 use kinded::Kinded;
 use log::debug;
 use variantly::Variantly;
-use winnow::Bytes;
 pub use winnow::LocatingSlice;
 use winnow::ModalResult as WResult;
 use winnow::Parser;
@@ -16,14 +14,10 @@ use winnow::binary::le_u16;
 use winnow::binary::le_u32;
 use winnow::binary::u8;
 use winnow::combinator::alt;
-use winnow::error::ContextError;
 use winnow::error::ErrMode;
 use winnow::error::StrContext;
-use winnow::stream::Location;
 use winnow::stream::Offset;
 use winnow::stream::Stream as _;
-use winnow::token::literal;
-use winnow::token::one_of;
 use winnow::token::take;
 
 #[derive(Debug, Clone)]

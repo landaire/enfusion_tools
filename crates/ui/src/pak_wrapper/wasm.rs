@@ -1,46 +1,34 @@
-use std::{
-    collections::HashMap,
-    io::{Read, Seek},
-    path::PathBuf,
-    pin::Pin,
-    sync::{Arc, Mutex},
-};
+use std::collections::HashMap;
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::Mutex;
 
 use async_trait::async_trait;
 use eframe::wasm_bindgen::prelude::Closure;
-use enfusion_pak::{
-    PakFile, PakParser, ParserStateMachine, Stream,
-    async_pak_vfs::AsyncPrime,
-    pak_vfs::Prime,
-    winnow::{
-        error::{ErrMode, Needed},
-        stream::{Offset, Stream as _},
-    },
-};
-use futures::{
-    SinkExt,
-    channel::{
-        mpsc,
-        oneshot::{self, Canceled},
-    },
-};
+use enfusion_pak::PakFile;
+use enfusion_pak::PakParser;
+use enfusion_pak::ParserStateMachine;
+use enfusion_pak::Stream;
+use enfusion_pak::async_pak_vfs::AsyncPrime;
+use enfusion_pak::pak_vfs::Prime;
+use enfusion_pak::winnow::stream::Offset;
+use enfusion_pak::winnow::stream::Stream as _;
+use futures::channel::oneshot::{self};
 use log::debug;
-use oval::Buffer;
-use wasm_bindgen::{JsCast, JsValue};
-use wasm_bindgen_futures::JsFuture;
-use web_sys::{File, FileReader, js_sys};
+use wasm_bindgen::JsCast;
+use wasm_bindgen::JsValue;
+use web_sys::js_sys;
 
-use crate::task::{FileReference, execute};
-
-const BUFFER_SIZE_BYTES: usize = 1024 * 1024 * 20;
+use crate::task::FileReference;
+use crate::task::execute;
 
 #[derive(Debug)]
+#[allow(unused)]
 pub struct WrappedPakFile {
     path: PathBuf,
     handle: FileReference,
     buffer: Mutex<HashMap<std::ops::Range<usize>, BufferWrapper>>,
     pak_file: PakFile,
-    pos: usize,
 }
 
 impl AsRef<PakFile> for WrappedPakFile {
@@ -90,7 +78,7 @@ impl AsyncPrime for WrappedPakFile {
                 .await
                 .expect("failed to read buffer");
 
-            tx.send(data);
+            let _ = tx.send(data);
         });
 
         if let Ok(data) = rx.await {
@@ -105,7 +93,7 @@ impl AsyncPrime for WrappedPakFile {
             // To prevent memory usage from ballooning, we will evict entries from cache if we're above a certain threshold
             let mut buffers_and_mem_usage =
                 buffers.iter().map(|(k, v)| (k.clone(), v.0.capacity())).collect::<Vec<_>>();
-            let mut mem_usage = buffers_and_mem_usage.iter().fold(0, |accum, (k, mem)| accum + mem);
+            let mut mem_usage = buffers_and_mem_usage.iter().fold(0, |accum, (_, mem)| accum + mem);
 
             // Don't consume more than 20MiB
             const MEM_LIMIT: usize = 1024 * 1024 * 20;
@@ -214,7 +202,6 @@ pub async fn parse_pak_file(file_handle: FileReference) -> WrappedPakFile {
                     handle: file_handle,
                     buffer: Default::default(),
                     pak_file,
-                    pos: 0,
                 };
             }
             Ok(ParserStateMachine::Skip { from: _, count, parser: next_parser }) => {

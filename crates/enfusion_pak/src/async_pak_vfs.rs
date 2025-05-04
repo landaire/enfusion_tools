@@ -1,17 +1,21 @@
 use async_trait::async_trait;
-use std::{fmt::Debug, ops::Range};
-use vfs::{
-    VfsError, VfsMetadata, VfsResult,
-    async_vfs::{AsyncFileSystem, SeekAndRead},
-    error::VfsErrorKind,
-};
+use std::fmt::Debug;
+use std::ops::Range;
+use vfs::VfsError;
+use vfs::VfsMetadata;
+use vfs::VfsResult;
+use vfs::async_vfs::AsyncFileSystem;
+use vfs::async_vfs::SeekAndRead;
+use vfs::error::VfsErrorKind;
 
-use crate::{FileEntryMeta, PakFile, pak_vfs::PakVfs};
+use crate::FileEntryMeta;
+use crate::PakFile;
+use crate::pak_vfs::PakVfs;
 
-use async_std::{
-    io::{Cursor, Write},
-    stream::{self, Stream},
-};
+use async_std::io::Cursor;
+use async_std::io::Write;
+use async_std::stream::Stream;
+use async_std::stream::{self};
 
 #[async_trait]
 pub trait AsyncPrime {
@@ -42,7 +46,7 @@ where
         }
     }
 
-    async fn create_dir(&self, path: &str) -> vfs::VfsResult<()> {
+    async fn create_dir(&self, _path: &str) -> vfs::VfsResult<()> {
         todo!()
     }
 
@@ -77,11 +81,11 @@ where
         }
     }
 
-    async fn create_file(&self, path: &str) -> VfsResult<Box<dyn Write + Send + Unpin>> {
+    async fn create_file(&self, _path: &str) -> VfsResult<Box<dyn Write + Send + Unpin>> {
         todo!()
     }
 
-    async fn append_file(&self, path: &str) -> VfsResult<Box<dyn Write + Send + Unpin>> {
+    async fn append_file(&self, _path: &str) -> VfsResult<Box<dyn Write + Send + Unpin>> {
         todo!()
     }
 
@@ -90,23 +94,14 @@ where
 
         let pak_meta = entry.meta();
         let meta = match pak_meta {
-            FileEntryMeta::Folder { children } => VfsMetadata {
+            FileEntryMeta::Folder { children: _ } => VfsMetadata {
                 file_type: vfs::VfsFileType::Directory,
                 len: 0,
                 created: None,
                 modified: None,
                 accessed: None,
             },
-            FileEntryMeta::File {
-                offset,
-                compressed_len,
-                decompressed_len,
-                unk,
-                unk2,
-                compressed,
-                compression_level,
-                timestamp,
-            } => {
+            FileEntryMeta::File { decompressed_len, .. } => {
                 // let converted_timestamp = pak_meta.parsed_timestamp().map(|ts| {
                 //     SystemTime::fr
                 // })
@@ -131,11 +126,11 @@ where
         Ok(false)
     }
 
-    async fn remove_file(&self, path: &str) -> vfs::VfsResult<()> {
+    async fn remove_file(&self, _path: &str) -> vfs::VfsResult<()> {
         todo!()
     }
 
-    async fn remove_dir(&self, path: &str) -> vfs::VfsResult<()> {
+    async fn remove_dir(&self, _path: &str) -> vfs::VfsResult<()> {
         todo!()
     }
 

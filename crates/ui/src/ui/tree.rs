@@ -3,9 +3,7 @@ use egui::Label;
 use egui::ScrollArea;
 use egui::Sense;
 use egui::Ui;
-use enfusion_pak::vfs::OverlayFS;
 use enfusion_pak::vfs::VfsPath;
-use enfusion_pak::vfs::async_vfs::AsyncVfsPath;
 use itertools::Itertools;
 use log::debug;
 

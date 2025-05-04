@@ -85,7 +85,7 @@ where
         }
     }
 
-    fn create_dir(&self, path: &str) -> vfs::VfsResult<()> {
+    fn create_dir(&self, _path: &str) -> vfs::VfsResult<()> {
         todo!()
     }
 
@@ -120,11 +120,11 @@ where
         }
     }
 
-    fn create_file(&self, path: &str) -> vfs::VfsResult<Box<dyn vfs::SeekAndWrite + Send>> {
+    fn create_file(&self, _path: &str) -> vfs::VfsResult<Box<dyn vfs::SeekAndWrite + Send>> {
         todo!()
     }
 
-    fn append_file(&self, path: &str) -> vfs::VfsResult<Box<dyn vfs::SeekAndWrite + Send>> {
+    fn append_file(&self, _path: &str) -> vfs::VfsResult<Box<dyn vfs::SeekAndWrite + Send>> {
         todo!()
     }
 
@@ -133,23 +133,14 @@ where
 
         let pak_meta = entry.meta();
         let meta = match pak_meta {
-            FileEntryMeta::Folder { children } => VfsMetadata {
+            FileEntryMeta::Folder { children: _ } => VfsMetadata {
                 file_type: vfs::VfsFileType::Directory,
                 len: 0,
                 created: None,
                 modified: None,
                 accessed: None,
             },
-            FileEntryMeta::File {
-                offset,
-                compressed_len,
-                decompressed_len,
-                unk,
-                unk2,
-                compressed,
-                compression_level,
-                timestamp,
-            } => {
+            FileEntryMeta::File { decompressed_len, .. } => {
                 // let converted_timestamp = pak_meta.parsed_timestamp().map(|ts| {
                 //     SystemTime::fr
                 // })
@@ -174,11 +165,11 @@ where
         Ok(false)
     }
 
-    fn remove_file(&self, path: &str) -> vfs::VfsResult<()> {
+    fn remove_file(&self, _path: &str) -> vfs::VfsResult<()> {
         todo!()
     }
 
-    fn remove_dir(&self, path: &str) -> vfs::VfsResult<()> {
+    fn remove_dir(&self, _path: &str) -> vfs::VfsResult<()> {
         todo!()
     }
 
