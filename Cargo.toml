@@ -1,3 +1,7 @@
 [workspace]
 members = ["crates/*"]
 resolver = "3"
+
+[patch.crates-io]
+#vfs = { git = "https://github.com/landaire/rust-vfs.git", branch = "fix/wasm" }
+vfs = { path = "../rust-vfs" }

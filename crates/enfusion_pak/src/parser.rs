@@ -4,19 +4,20 @@ use crate::error::PakError;
 use jiff::civil::DateTime;
 use kinded::Kind;
 use kinded::Kinded;
-use tracing::debug;
+use log::debug;
 use variantly::Variantly;
 use winnow::Bytes;
 pub use winnow::LocatingSlice;
+use winnow::ModalResult as WResult;
 use winnow::Parser;
 pub use winnow::Partial;
-use winnow::Result as WResult;
 use winnow::binary::be_u32;
 use winnow::binary::le_u16;
 use winnow::binary::le_u32;
 use winnow::binary::u8;
 use winnow::combinator::alt;
 use winnow::error::ContextError;
+use winnow::error::ErrMode;
 use winnow::error::StrContext;
 use winnow::stream::Location;
 use winnow::stream::Offset;
@@ -185,25 +186,32 @@ impl PakFile {
 
         let mut curr_data = data;
         loop {
-            let mut input = Stream::new(Bytes::new(curr_data));
+            let mut input = Stream::new(curr_data);
+            let start = input.checkpoint();
             // For mmap the parser should never raise an error or require state transitions
             match parser.parse(&mut input) {
                 Ok(ParserStateMachine::Done(pak_file)) => {
                     return Ok(pak_file);
                 }
                 Ok(ParserStateMachine::Skip { from, count, parser: next_parser }) => {
+                    let parsed = input.checkpoint().offset_from(&start);
+                    curr_data = &curr_data[parsed..];
+
                     debug!(
                         "Skipping {count:#X} bytes from {from:#X} (offset is now: {:#X})",
                         next_parser.bytes_parsed()
                     );
-                    curr_data = &data[from + count..];
+                    curr_data = &curr_data[count..];
                     parser = next_parser;
                 }
                 Ok(state) => {
                     panic!("Unexpected state: {:?}", state.kind());
                 }
-                Err(e) => {
+                Err(winnow::error::ErrMode::Cut(e)) => {
                     return Err(PakError::ParserError(e));
+                }
+                Err(e) => {
+                    panic!("Unknown error occurred: {:?}", e);
                 }
             }
         }
@@ -217,7 +225,7 @@ pub struct PakParser {
     bytes_parsed: usize,
 }
 
-type Stream<'i> = Partial<&'i Bytes>;
+pub type Stream<'i> = Partial<&'i [u8]>;
 
 impl PakParser {
     pub fn new() -> Self {
@@ -282,7 +290,18 @@ impl PakParser {
 
         match &self.state {
             PakParserState::ParsingChunk => {
-                let parsed = parse_chunk(input)?;
+                debug!("Reading a chunk");
+                let res = parse_chunk(input);
+                let parsed = match res {
+                    Ok(parsed) => parsed,
+                    Err(ErrMode::Incomplete(_)) => {
+                        input.reset(&start);
+                        return Ok(ParserStateMachine::Continue(self));
+                    }
+                    Err(e) => {
+                        return Err(e);
+                    }
+                };
                 debug!("Read complete! Result: {:#?}", parsed.kind());
 
                 // Parse a single chunk
@@ -327,16 +346,31 @@ impl PakParser {
                 }
             }
             PakParserState::ParsingFileChunk { .. } => {
+                debug!("Reading the file chunk");
                 // Continue parsing file chunk
-                self.parse_file_entry(input)?;
+                match self.parse_file_entry(input) {
+                    Ok(_) => {
+                        // do nothing
+                    }
+                    Err(ErrMode::Incomplete(_)) => {
+                        debug!("incomplete while reading file entry");
+                        input.reset(&start);
+                        return Ok(ParserStateMachine::Continue(self));
+                    }
+                    Err(e) => {
+                        debug!("hard error while reading file entry");
+                        return Err(e);
+                    }
+                }
                 self.next_state(input.checkpoint().offset_from(&start), None);
             }
             PakParserState::Done => {
+                debug!("Done");
                 unreachable!("Loop should exist before PakParserState::Done is ever reached")
             }
         }
 
-        Ok(ParserStateMachine::Continue(self))
+        Ok(ParserStateMachine::Loop(self))
     }
 
     pub fn parse(mut self, input: &mut Stream) -> WResult<ParserStateMachine> {
@@ -344,7 +378,8 @@ impl PakParser {
         // machine quest up the stack.
         while !matches!(self.state, PakParserState::Done) {
             let next_state = self.parse_impl(input)?;
-            if let ParserStateMachine::Continue(this) = next_state {
+
+            if let ParserStateMachine::Loop(this) = next_state {
                 self = this;
                 continue;
             }
@@ -442,6 +477,7 @@ enum Parsed {
 
 #[derive(Kinded)]
 pub enum ParserStateMachine {
+    Loop(PakParser),
     Continue(PakParser),
     Skip { from: usize, count: usize, parser: PakParser },
     Done(PakFile),

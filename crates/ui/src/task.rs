@@ -8,13 +8,13 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 use std::sync::mpsc;
+use std::sync::mpsc::Receiver;
 
 use egui_inbox::UiInboxSender;
 use enfusion_pak::PakFile;
 use enfusion_pak::error::PakError;
 use enfusion_pak::pak_vfs::PakVfs;
 use enfusion_pak::vfs::VfsPath;
-use memmap2::Mmap;
 use regex::Regex;
 
 use crate::pak_wrapper::parse_pak_file;
@@ -27,7 +27,7 @@ pub enum BackgroundTaskMessage {
 
 pub enum BackgroundTask {
     /// Requests the background thread to begin parsing PAK files.
-    LoadPakFiles(Vec<PathBuf>),
+    LoadPakFiles(Vec<FileReference>),
     PerformSearch(VfsPath, String),
 }
 
@@ -176,46 +176,122 @@ pub fn perform_search(
     }
 }
 
+#[cfg(target_arch = "wasm32")]
+#[repr(transparent)]
+#[derive(Debug)]
+pub struct FileReference(pub rfd::FileHandle);
+#[cfg(target_arch = "wasm32")]
+unsafe impl Send for FileReference {}
+unsafe impl Sync for FileReference {}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[repr(transparent)]
+#[derive(Debug)]
+pub struct FileReference(pub PathBuf);
+
 pub fn start_background_thread(
     inbox: UiInboxSender<BackgroundTaskMessage>,
-) -> std::sync::mpsc::Sender<BackgroundTask> {
+) -> (std::sync::mpsc::Sender<BackgroundTask>, Option<Receiver<BackgroundTask>>) {
     let (sender, task_queue) = mpsc::channel();
+
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        std::thread::spawn(move || {
+            // Force a move into this thread
+            let task_queue = task_queue;
+            process_background_messages(inbox, &task_queue);
+        });
+        return (sender, None);
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    {
+        // suppress unused var warning
+        let _inbox = inbox;
+        (sender, Some(task_queue))
+    }
+}
+
+pub fn process_background_messages(
+    inbox: UiInboxSender<BackgroundTaskMessage>,
+    task_queue: &Receiver<BackgroundTask>,
+) {
     let mut search_stop = Arc::new(AtomicBool::new(false));
-    std::thread::spawn(move || {
-        while let Ok(task) = task_queue.recv() {
-            match task {
-                BackgroundTask::LoadPakFiles(mut paths) => {
-                    let parsed_files = paths
-                        .drain(..)
-                        .map(|path| {
-                            let parsed_file = parse_pak_file(path)?;
-                            let vfs = PakVfs::new(Arc::new(parsed_file));
-                            Ok(VfsPath::new(vfs))
-                        })
-                        .collect::<Result<Vec<_>, PakError>>();
+    #[cfg(not(target_arch = "wasm32"))]
+    let get_message = || task_queue.recv();
+    #[cfg(target_arch = "wasm32")]
+    let get_message = || task_queue.try_recv();
+    while let Ok(task) = get_message() {
+        match task {
+            BackgroundTask::LoadPakFiles(handles) => {
+                let inbox = inbox.clone();
+                execute(async move {
+                    let mut parsed_files = Vec::with_capacity(handles.len());
+                    for handle in handles {
+                        #[cfg(target_arch = "wasm32")]
+                        {
+                            match Ok(parse_pak_file(handle).await) {
+                                Ok(parsed_file) => {
+                                    let vfs = PakVfs::new(Arc::new(parsed_file));
+                                    parsed_files.push(VfsPath::new(vfs));
+                                }
+                                Err(e) => {
+                                    inbox
+                                        .send(BackgroundTaskMessage::LoadPakFiles(Err(e)))
+                                        .expect("failed to send completion");
+                                }
+                            }
+                        }
+                        #[cfg(not(target_arch = "wasm32"))]
+                        {
+                            match parse_pak_file(handle.0) {
+                                Ok(parsed_file) => {
+                                    let vfs = PakVfs::new(Arc::new(parsed_file));
+                                    parsed_files.push(VfsPath::new(vfs));
+                                }
+                                Err(e) => {
+                                    inbox
+                                        .send(BackgroundTaskMessage::LoadPakFiles(Err(e)))
+                                        .expect("failed to send completion");
+                                }
+                            }
+                        }
+                    }
 
                     inbox
-                        .send(BackgroundTaskMessage::LoadPakFiles(parsed_files))
+                        .send(BackgroundTaskMessage::LoadPakFiles(Ok(parsed_files)))
                         .expect("failed to send completion");
-                }
-                BackgroundTask::PerformSearch(start_path, query) => {
-                    // Notify any pending searches that they should stop
-                    search_stop.store(true, std::sync::atomic::Ordering::Relaxed);
-                    drop(search_stop);
+                });
+            }
+            BackgroundTask::PerformSearch(start_path, query) => {
+                // Notify any pending searches that they should stop
+                search_stop.store(true, std::sync::atomic::Ordering::Relaxed);
+                drop(search_stop);
 
-                    search_stop = Arc::new(AtomicBool::new(false));
+                search_stop = Arc::new(AtomicBool::new(false));
 
-                    // Start a new thread for search. This will allow us to easily drop searches when
-                    // the user performs a new search
-                    let thread_sender = inbox.clone();
-                    let thread_stopper = search_stop.clone();
-                    std::thread::spawn(move || {
-                        perform_search(start_path, query, thread_stopper, thread_sender);
-                    });
-                }
+                // Start a new thread for search. This will allow us to easily drop searches when
+                // the user performs a new search
+                let thread_sender = inbox.clone();
+                let thread_stopper = search_stop.clone();
+                #[cfg(not(target_arch = "wasm32"))]
+                std::thread::spawn(move || {
+                    perform_search(start_path, query, thread_stopper, thread_sender);
+                });
+                #[cfg(target_arch = "wasm32")]
+                perform_search(start_path, query, thread_stopper, thread_sender);
             }
         }
-    });
+    }
+}
 
-    sender
+#[cfg(not(target_arch = "wasm32"))]
+pub fn execute<F: Future<Output = ()> + Send + 'static>(f: F) {
+    // this is stupid... use any executor of your choice instead
+    std::thread::spawn(move || futures::executor::block_on(f));
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn execute<F: Future<Output = ()> + 'static>(f: F) {
+    wasm_bindgen_futures::spawn_local(f);
 }

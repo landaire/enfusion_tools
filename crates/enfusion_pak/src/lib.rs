@@ -4,3 +4,4 @@ pub mod pak_vfs;
 mod parser;
 mod stream;
 pub use vfs;
+pub use winnow;

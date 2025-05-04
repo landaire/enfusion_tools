@@ -34,6 +34,7 @@ enfusion_pak = { version = "*", path = "../enfusion_pak" }
 itertools = "0.14.0"
 egui_code_editor = "0.2.13"
 regex = "1.11.1"
+futures = "0.3.31"
 
 # native:
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
@@ -42,6 +43,7 @@ memmap2 = "0.9.5"
 
 # web:
 [target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = "0.2.100"
 wasm-bindgen-futures = "0.4.50"
 web-sys = "0.3.70"              # to access the DOM (to hide the loading text)
 oval = "2.0.0"

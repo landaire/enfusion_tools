@@ -10,12 +10,16 @@ use enfusion_pak::vfs::VfsPath;
 
 use crate::task::BackgroundTask;
 use crate::task::BackgroundTaskMessage;
+use crate::task::FileReference;
+use crate::task::execute;
+use crate::task::process_background_messages;
 use crate::task::start_background_thread;
 
 pub(crate) struct Internal {
     inbox: egui_inbox::UiInbox<BackgroundTaskMessage>,
 
     task_queue: Option<mpsc::Sender<BackgroundTask>>,
+    task_queue_rx: Option<mpsc::Receiver<BackgroundTask>>,
 
     pub(crate) pak_files: Vec<VfsPath>,
 
@@ -49,6 +53,7 @@ impl Default for EnfusionToolsApp {
             internal: Internal {
                 inbox,
                 task_queue: None,
+                task_queue_rx: None,
                 pak_files: Vec::new(),
                 overlay_fs: None,
                 opened_file_text: "".to_string(),
@@ -73,22 +78,27 @@ impl EnfusionToolsApp {
             Default::default()
         };
 
-        let task_queue = start_background_thread(app.internal.inbox.sender());
+        let (task_queue, maybe_task_queue_receiver) =
+            start_background_thread(app.internal.inbox.sender());
 
-        let mut pak_files = Vec::new();
-        for entry in std::fs::read_dir(&app.data_path).expect("failed to read dir") {
-            let entry = entry.expect("could not get entry");
-            let path = entry.path();
-            if let Some("pak") = path.extension().and_then(OsStr::to_str) {
-                pak_files.push(path);
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let mut pak_files = Vec::new();
+            for entry in std::fs::read_dir(&app.data_path).expect("failed to read dir") {
+                let entry = entry.expect("could not get entry");
+                let path = entry.path();
+                if let Some("pak") = path.extension().and_then(OsStr::to_str) {
+                    pak_files.push(FileReference(path));
+                }
             }
+
+            task_queue
+                .send(BackgroundTask::LoadPakFiles(pak_files))
+                .expect("failed to send background task");
         }
 
-        task_queue
-            .send(BackgroundTask::LoadPakFiles(pak_files))
-            .expect("failed to send background task");
-
         app.internal.task_queue = Some(task_queue);
+        app.internal.task_queue_rx = maybe_task_queue_receiver;
 
         app
     }
@@ -103,6 +113,11 @@ impl eframe::App for EnfusionToolsApp {
     /// Called each time the UI needs repainting, which may be many times per second.
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.internal.inbox.set_ctx(ctx);
+
+        // Process any background messages
+        if let Some(task_queue_rx) = self.internal.task_queue_rx.as_ref() {
+            process_background_messages(self.internal.inbox.sender(), task_queue_rx);
+        }
 
         while let Some(message) = self.internal.inbox.read_without_ctx().next() {
             match message {
@@ -157,6 +172,30 @@ impl eframe::App for EnfusionToolsApp {
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.vertical(|ui| {
                 ui.horizontal(|ui| {
+                    if ui.button("Open").clicked() {
+                        let task = rfd::AsyncFileDialog::new().pick_files();
+                        if let Some(background_task_sender) = self.internal.task_queue.clone() {
+                            execute(async move {
+                                let file = task.await;
+                                if let Some(mut files) = file {
+                                    #[cfg(target_arch = "wasm32")]
+                                    let _ =
+                                        background_task_sender.send(BackgroundTask::LoadPakFiles(
+                                            files.drain(..).map(FileReference).collect(),
+                                        ));
+
+                                    #[cfg(not(target_arch = "wasm32"))]
+                                    let _ =
+                                        background_task_sender.send(BackgroundTask::LoadPakFiles(
+                                            files
+                                                .drain(..)
+                                                .map(|handle| FileReference(handle.path.to_owned()))
+                                                .collect(),
+                                        ));
+                                }
+                            });
+                        }
+                    }
                     ui.label("Search");
                     if ui.text_edit_singleline(&mut self.search_query).changed() {
                         if let Some(task_queue) = &self.internal.task_queue {
