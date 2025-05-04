@@ -126,8 +126,6 @@ pub async fn read_file_slice(
     start: u64,
     end: u64,
 ) -> Result<Vec<u8>, JsValue> {
-    log::debug!("Performing a read from {start:#X} to {end:#X}");
-
     // Stolen from RFD's file reading implementation
     let file = file_reference.clone();
     let promise = js_sys::Promise::new(&mut move |res, _rej| {
@@ -158,8 +156,6 @@ pub async fn read_file_slice(
     let buffer: js_sys::Uint8Array = js_sys::Uint8Array::new(&res);
     let mut vec = vec![0; buffer.length() as usize];
     buffer.copy_to(&mut vec[..]);
-
-    debug!("First 4 bytes: {:#X?}", &vec[0..4]);
 
     Ok(vec)
 }
@@ -205,7 +201,6 @@ pub async fn parse_pak_file(file_handle: FileReference) -> WrappedPakFile {
                 };
             }
             Ok(ParserStateMachine::Skip { from: _, count, parser: next_parser }) => {
-                debug!("Parser requested a skip");
                 assert!(next_parser.bytes_parsed() > 0);
 
                 buffer.consume(
@@ -214,7 +209,6 @@ pub async fn parse_pak_file(file_handle: FileReference) -> WrappedPakFile {
                 parser = next_parser;
             }
             Ok(ParserStateMachine::Continue(next_parser)) => {
-                debug!("Parser requested a continue");
                 buffer.consume(input.checkpoint().offset_from(&start));
                 parser = next_parser;
             }
