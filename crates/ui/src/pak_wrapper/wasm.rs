@@ -13,7 +13,7 @@ use enfusion_pak::async_pak_vfs::AsyncPrime;
 use enfusion_pak::pak_vfs::Prime;
 use enfusion_pak::winnow::stream::Offset;
 use enfusion_pak::winnow::stream::Stream as _;
-use futures::channel::oneshot::{self};
+use futures::channel::oneshot;
 use log::debug;
 use wasm_bindgen::JsCast;
 use wasm_bindgen::JsValue;

@@ -14,8 +14,8 @@ use crate::pak_vfs::PakVfs;
 
 use async_std::io::Cursor;
 use async_std::io::Write;
+use async_std::stream;
 use async_std::stream::Stream;
-use async_std::stream::{self};
 
 #[async_trait]
 pub trait AsyncPrime {
