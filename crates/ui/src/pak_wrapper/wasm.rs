@@ -102,6 +102,26 @@ impl AsyncPrime for WrappedPakFile {
             buffer.fill(read as usize);
 
             let mut buffers = self.buffer.lock().unwrap();
+            // To prevent memory usage from ballooning, we will evict entries from cache if we're above a certain threshold
+            let mut buffers_and_mem_usage =
+                buffers.iter().map(|(k, v)| (k.clone(), v.0.capacity())).collect::<Vec<_>>();
+            let mut mem_usage = buffers_and_mem_usage.iter().fold(0, |accum, (k, mem)| accum + mem);
+
+            // Don't consume more than 20MiB
+            const MEM_LIMIT: usize = 1024 * 1024 * 20;
+            if mem_usage > MEM_LIMIT {
+                // Start removing large items from memory
+                buffers_and_mem_usage.sort_by_key(|(_, v)| *v);
+                for (k, v) in buffers_and_mem_usage {
+                    buffers.remove(&k);
+
+                    mem_usage -= v;
+                    if mem_usage < MEM_LIMIT {
+                        break;
+                    }
+                }
+            }
+
             let entry =
                 buffers.entry(file_range.clone()).insert_entry(BufferWrapper(Arc::new(buffer)));
 

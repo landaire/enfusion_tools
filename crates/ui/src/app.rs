@@ -10,6 +10,7 @@ use enfusion_pak::vfs::VfsPath;
 use enfusion_pak::vfs::async_vfs::AsyncMemoryFS;
 use enfusion_pak::vfs::async_vfs::AsyncOverlayFS;
 use enfusion_pak::vfs::async_vfs::AsyncVfsPath;
+use log::debug;
 
 use crate::task::BackgroundTask;
 use crate::task::BackgroundTaskMessage;
@@ -228,9 +229,15 @@ impl eframe::App for EnfusionToolsApp {
                         }
                     }
                     ui.label("Search");
-                    if ui.text_edit_singleline(&mut self.search_query).changed() {
+                    let response = ui.text_edit_singleline(&mut self.search_query);
+
+                    if response.lost_focus()
+                        && response.ctx.input(|input| input.key_pressed(egui::Key::Enter))
+                    {
+                        debug!("Search requested");
                         if let Some(task_queue) = &self.internal.task_queue {
                             if let Some(vfs_root) = self.internal.async_overlay_fs.clone() {
+                                debug!("Sending search task");
                                 self.internal.opened_file_text.clear();
                                 let _ = task_queue.send(BackgroundTask::PerformSearch(
                                     vfs_root,

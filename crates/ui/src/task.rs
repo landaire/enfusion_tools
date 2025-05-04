@@ -267,7 +267,7 @@ pub fn process_background_messages(
                             match parse_pak_file(handle.0) {
                                 Ok(parsed_file) => {
                                     let vfs = PakVfs::new(Arc::new(parsed_file));
-                                    parsed_files.push(VfsPath::new(vfs));
+                                    parsed_files.push(vfs);
                                 }
                                 Err(e) => {
                                     inbox
@@ -295,8 +295,8 @@ pub fn process_background_messages(
                 let thread_sender = inbox.clone();
                 let thread_stopper = search_stop.clone();
                 #[cfg(not(target_arch = "wasm32"))]
-                std::thread::spawn(move || {
-                    perform_search(start_path, query, thread_stopper, thread_sender);
+                execute(async move {
+                    perform_search(start_path, query, thread_stopper, thread_sender).await;
                 });
                 #[cfg(target_arch = "wasm32")]
                 execute(async move {

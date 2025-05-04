@@ -18,7 +18,7 @@ fn main() -> eframe::Result {
         ..Default::default()
     };
     eframe::run_native(
-        "eframe template",
+        "Enfusion Tools",
         native_options,
         Box::new(|cc| Ok(Box::new(ui::EnfusionToolsApp::new(cc)))),
     )

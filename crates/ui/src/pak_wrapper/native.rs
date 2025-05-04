@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use async_trait::async_trait;
+use enfusion_pak::async_pak_vfs::AsyncPrime;
 use enfusion_pak::pak_vfs::Prime;
 use enfusion_pak::{PakFile, error::PakError};
 use memmap2::Mmap;
