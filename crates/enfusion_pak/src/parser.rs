@@ -4,16 +4,25 @@ use crate::error::PakError;
 use jiff::civil::DateTime;
 use kinded::Kind;
 use kinded::Kinded;
+use tracing::debug;
 use variantly::Variantly;
-use winnow::LocatingSlice;
+use winnow::Bytes;
+pub use winnow::LocatingSlice;
 use winnow::Parser;
-use winnow::Partial;
+pub use winnow::Partial;
 use winnow::Result as WResult;
 use winnow::binary::be_u32;
 use winnow::binary::le_u16;
 use winnow::binary::le_u32;
 use winnow::binary::u8;
+use winnow::combinator::alt;
+use winnow::error::ContextError;
+use winnow::error::StrContext;
 use winnow::stream::Location;
+use winnow::stream::Offset;
+use winnow::stream::Stream as _;
+use winnow::token::literal;
+use winnow::token::one_of;
 use winnow::token::take;
 
 #[derive(Debug, Clone)]
@@ -49,7 +58,7 @@ impl FileEntry {
                 self_children.iter_mut().find(|self_child| self_child.name == other_child.name)
             {
                 if other_child.kind() == FileEntryKind::File {
-                    println!("{:#?}, {:#?}", self_child, other_child);
+                    debug!("{:#?}, {:#?}", &self_child, &other_child);
                 }
                 assert_eq!(other_child.kind(), self_child.kind());
                 assert_ne!(
@@ -164,92 +173,287 @@ pub enum PakType {
 #[derive(Debug, Kinded, Variantly)]
 pub enum Chunk {
     Form { file_size: u32, pak_file_type: PakType },
-    Head { version: u32, header_data: Range<usize> },
+    Head { version: u32, unknown_data: Range<usize> },
     Data { data: Range<usize> },
     File { fs: FileEntry },
     Unknown(u32),
 }
 
 impl PakFile {
-    pub fn parse(input: &[u8]) -> Result<PakFile, PakError> {
-        parse_pak(input)
+    pub fn parse(data: &[u8]) -> Result<PakFile, PakError> {
+        let mut parser = PakParser::new();
+
+        let mut curr_data = data;
+        loop {
+            let mut input = Stream::new(Bytes::new(curr_data));
+            // For mmap the parser should never raise an error or require state transitions
+            match parser.parse(&mut input) {
+                Ok(ParserStateMachine::Done(pak_file)) => {
+                    return Ok(pak_file);
+                }
+                Ok(ParserStateMachine::Skip { from, count, parser: next_parser }) => {
+                    debug!(
+                        "Skipping {count:#X} bytes from {from:#X} (offset is now: {:#X})",
+                        next_parser.bytes_parsed()
+                    );
+                    curr_data = &data[from + count..];
+                    parser = next_parser;
+                }
+                Ok(state) => {
+                    panic!("Unexpected state: {:?}", state.kind());
+                }
+                Err(e) => {
+                    return Err(PakError::ParserError(e));
+                }
+            }
+        }
     }
 }
 
-#[derive(Default)]
-struct ParserContext {
-    offset: usize,
+pub struct PakParser {
+    state: PakParserState,
+    chunks: Vec<Chunk>,
+    pak_len: Option<usize>,
+    bytes_parsed: usize,
 }
 
-fn seek(ahead: usize, input: &mut LocatingSlice<Partial<&[u8]>>) -> WResult<()> {
-    take(ahead).void().parse_next(input)
-}
+type Stream<'i> = Partial<&'i Bytes>;
 
-fn parse_pak(input: &[u8]) -> Result<PakFile, PakError> {
-    let mut chunks = vec![];
+impl PakParser {
+    pub fn new() -> Self {
+        PakParser {
+            state: PakParserState::ParsingChunk,
+            chunks: Vec::with_capacity(4),
+            pak_len: None,
+            bytes_parsed: 0,
+        }
+    }
 
-    let mut input = LocatingSlice::new(Partial::new(input));
+    pub fn bytes_parsed(&self) -> usize {
+        self.bytes_parsed
+    }
 
-    loop {
-        match parse_chunk(&mut input) {
-            Ok((skip_bytes, chunk)) => {
-                seek(skip_bytes, &mut input);
-                chunks.push(chunk);
-            }
-            Err(e) => {
-                println!("{:?}", e);
-                break;
+    fn next_state(&mut self, bytes_consumed: usize, override_state: Option<PakParserState>) {
+        debug!("Consumed {:#X} bytes from offset {:#X}", bytes_consumed, self.bytes_parsed);
+        self.bytes_parsed += bytes_consumed;
+
+        if let Some(override_state) = override_state {
+            self.state = override_state
+        } else {
+            let old_state = std::mem::replace(&mut self.state, PakParserState::ParsingChunk);
+            self.state = match old_state {
+                PakParserState::ParsingChunk => PakParserState::ParsingChunk,
+                PakParserState::ParsingFileChunk {
+                    parsed_root,
+                    mut parents,
+                    bytes_processed,
+                    chunk_len,
+                } => {
+                    if bytes_processed + bytes_consumed > chunk_len - 100 {
+                        println!(
+                            "{bytes_processed:#X} processed, {} bytes remaining",
+                            chunk_len - bytes_processed + bytes_consumed
+                        );
+                    }
+                    if bytes_processed + bytes_consumed == chunk_len {
+                        assert_eq!(parents.len(), 1);
+                        self.chunks.push(Chunk::File { fs: parents.pop().unwrap().entry });
+                        PakParserState::Done
+                    } else {
+                        PakParserState::ParsingFileChunk {
+                            parsed_root,
+                            parents,
+                            bytes_processed: bytes_processed + bytes_consumed,
+                            chunk_len,
+                        }
+                    }
+                }
+                PakParserState::Done => PakParserState::Done,
+            };
+        }
+
+        // If we've reached the end of the file, we're done. This check must come last
+        // to ensure all of the above state transitions can handle anything they need
+        // to do.
+        if let Some(pak_len) = self.pak_len {
+            if self.bytes_parsed == pak_len {
+                self.state = PakParserState::Done;
             }
         }
     }
 
-    Ok(PakFile { chunks })
-}
+    pub fn parse_impl(mut self, input: &mut Stream) -> WResult<ParserStateMachine> {
+        let start = input.checkpoint();
+        debug!("Beginning read from {:#X}", self.bytes_parsed);
 
-fn parse_form_chunk(input: &mut LocatingSlice<Partial<&[u8]>>) -> WResult<(usize, Chunk)> {
-    let file_size = be_u32(input)?;
-    let pak_type_bytes: [u8; 4] = take(4usize)
-        .parse_next(input)?
-        .try_into()
-        .expect("winnow should have returned a 4-byte buffer");
-    let pak_file_type = match &pak_type_bytes {
-        b"PAC1" => PakType::PAC1,
-        unk => {
-            panic!("unknown pak type: {:?}", unk);
+        match &self.state {
+            PakParserState::ParsingChunk => {
+                let parsed = parse_chunk(input)?;
+                debug!("Read complete! Result: {:#?}", parsed.kind());
+
+                // Parse a single chunk
+                let (skip, chunk, state) = match parsed {
+                    Parsed::Chunk(chunk) => (0, Some(chunk), None),
+                    Parsed::ChunkAndSkip(skip, chunk) => (skip, Some(chunk), None),
+                    Parsed::FileChunkHeader { chunk_len } => {
+                        println!(
+                            "We have {:#X} bytes to read starting at {:#X}",
+                            chunk_len, self.bytes_parsed
+                        );
+                        let override_state = PakParserState::ParsingFileChunk {
+                            parsed_root: false,
+                            parents: Vec::with_capacity(4),
+                            chunk_len,
+                            bytes_processed: 0,
+                        };
+
+                        (0, None, Some(override_state))
+                    }
+                };
+
+                let bytes_consumed = input.checkpoint().offset_from(&start);
+                self.next_state(input.checkpoint().offset_from(&start) + skip, state);
+
+                let skip_from = self.bytes_parsed - skip;
+
+                if let Some(chunk) = chunk {
+                    if let Chunk::Form { file_size, .. } = &chunk {
+                        // TODO: we shouldn't read the PAC1 data here
+                        self.pak_len = Some((*file_size as usize) + (bytes_consumed - 4));
+                        self.chunks.push(chunk);
+                    }
+                }
+
+                if skip > 0 {
+                    return Ok(ParserStateMachine::Skip {
+                        from: skip_from,
+                        count: skip,
+                        parser: self,
+                    });
+                }
+            }
+            PakParserState::ParsingFileChunk { .. } => {
+                // Continue parsing file chunk
+                self.parse_file_entry(input)?;
+                self.next_state(input.checkpoint().offset_from(&start), None);
+            }
+            PakParserState::Done => {
+                unreachable!("Loop should exist before PakParserState::Done is ever reached")
+            }
         }
-    };
-    Ok((0, Chunk::Form { file_size, pak_file_type }))
+
+        Ok(ParserStateMachine::Continue(self))
+    }
+
+    pub fn parse(mut self, input: &mut Stream) -> WResult<ParserStateMachine> {
+        // Parse as much data as we can. We either complete, or have to forward a state
+        // machine quest up the stack.
+        while !matches!(self.state, PakParserState::Done) {
+            let next_state = self.parse_impl(input)?;
+            if let ParserStateMachine::Continue(this) = next_state {
+                self = this;
+                continue;
+            }
+
+            return Ok(next_state);
+        }
+
+        Ok(ParserStateMachine::Done(self.complete()))
+    }
+
+    fn parse_file_entry(&mut self, input: &mut Stream) -> WResult<()> {
+        let PakParserState::ParsingFileChunk { parsed_root, parents, .. } = &mut self.state else {
+            panic!("Ended up in parse_file_entry in the wrong state")
+        };
+
+        let (entry, children) = parse_file_entry(input)?;
+
+        match entry.meta.kind() {
+            FileEntryKind::Folder => {
+                parents.push(Directory {
+                    is_root: !*parsed_root,
+                    children_remaining: children,
+                    entry,
+                });
+
+                *parsed_root = true;
+            }
+            FileEntryKind::File => {
+                let parent = parents.last_mut().expect("bug: no parent for this file");
+                parent.children_remaining = parent
+                    .children_remaining
+                    .checked_sub(1)
+                    .expect("encountered more children than expected for a folder");
+
+                parent.entry.meta.push_child(entry);
+            }
+        }
+
+        // Check to see if the parents can be coalesced
+        while let Some(dir) =
+            parents.pop_if(|parent| parent.children_remaining == 0 && !parent.is_root)
+        {
+            let parent =
+                parents.last_mut().expect("expected a folder to have a parent, but there is none");
+
+            parent.children_remaining = parent
+                .children_remaining
+                .checked_sub(1)
+                .expect("encountered more children than expected for a folder");
+
+            parent.entry.meta.push_child(dir.entry);
+        }
+
+        Ok(())
+    }
+
+    pub fn complete(self) -> PakFile {
+        PakFile { chunks: self.chunks }
+    }
 }
 
-fn parse_head_chunk(input: &mut LocatingSlice<Partial<&[u8]>>) -> WResult<(usize, Chunk)> {
-    let header_len = be_u32.parse_next(input)? as usize;
-    assert_eq!(header_len, 0x1c);
-
-    let mut skip_bytes = 0;
-
-    let header_start = input.current_token_start();
-    let version = le_u32.parse_next(input)?;
-    skip_bytes += 4;
-
-    let header_range = (header_start + skip_bytes)..(header_start + header_len);
-
-    let chunk = Chunk::Head { version, header_data: header_range };
-
-    Ok((header_len - skip_bytes, chunk))
+impl Default for PakParser {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
-fn parse_data_chunk(input: &mut LocatingSlice<Partial<&[u8]>>) -> WResult<(usize, Chunk)> {
-    let data_len = be_u32.parse_next(input)? as usize;
-
-    let data_start = input.current_token_start();
-    //take(data_len).void().parse_next(input)?;
-
-    let chunk = Chunk::Data { data: data_start..(data_start + data_len) };
-
-    Ok((data_len, chunk))
+#[derive(Debug, Clone)]
+struct Directory {
+    is_root: bool,
+    children_remaining: usize,
+    entry: FileEntry,
 }
 
-fn parse_file_entry(input: &mut &[u8]) -> WResult<(FileEntry, usize)> {
+#[derive(Debug)]
+enum PakParserState {
+    ParsingChunk,
+    ParsingFileChunk {
+        parsed_root: bool,
+        parents: Vec<Directory>,
+        bytes_processed: usize,
+        chunk_len: usize,
+    },
+    Done,
+}
+
+impl PakParserState {}
+
+#[derive(Kinded)]
+enum Parsed {
+    Chunk(Chunk),
+    ChunkAndSkip(usize, Chunk),
+    FileChunkHeader { chunk_len: usize },
+}
+
+#[derive(Kinded)]
+pub enum ParserStateMachine {
+    Continue(PakParser),
+    Skip { from: usize, count: usize, parser: PakParser },
+    Done(PakFile),
+}
+
+fn parse_file_entry(input: &mut Stream) -> WResult<(FileEntry, usize)> {
     let entry_kind: FileEntryKind = u8(input)?.try_into().expect("???");
     let name_len = u8(input)?;
     let name = take(name_len).parse_next(input)?;
@@ -295,80 +499,77 @@ fn parse_file_entry(input: &mut &[u8]) -> WResult<(FileEntry, usize)> {
     Ok((FileEntry { name, meta }, children))
 }
 
-fn parse_file_chunk(input: &mut LocatingSlice<Partial<&[u8]>>) -> WResult<(usize, Chunk)> {
-    let chunk_len = be_u32(input)?;
-
-    let mut chunk_data = take(chunk_len).parse_next(input)?;
-
-    struct Directory {
-        is_root: bool,
-        children_remaining: usize,
-        entry: FileEntry,
-    }
-
-    let mut parents = vec![];
-    let mut parsed_root = false;
-
-    while !chunk_data.is_empty() {
-        let (entry, children) = parse_file_entry(&mut chunk_data)?;
-
-        match entry.meta.kind() {
-            FileEntryKind::Folder => {
-                parents.push(Directory {
-                    is_root: !parsed_root,
-                    children_remaining: children,
-                    entry,
-                });
-
-                parsed_root = true;
-            }
-            FileEntryKind::File => {
-                let parent = parents.last_mut().expect("bug: no parent for this file");
-                parent.children_remaining = parent
-                    .children_remaining
-                    .checked_sub(1)
-                    .expect("encountered more children than expected for a folder");
-
-                parent.entry.meta.push_child(entry);
-            }
-        }
-
-        // Check to see if the parents can be coalesced
-        while let Some(dir) =
-            parents.pop_if(|parent| parent.children_remaining == 0 && !parent.is_root)
-        {
-            let parent =
-                parents.last_mut().expect("expected a folder to have a parent, but there is none");
-
-            parent.children_remaining = parent
-                .children_remaining
-                .checked_sub(1)
-                .expect("encountered more children than expected for a folder");
-
-            parent.entry.meta.push_child(dir.entry);
-        }
-    }
-
-    assert_eq!(parents.len(), 1);
-
-    let chunk = Chunk::File { fs: parents.pop().expect("no parents?").entry };
-
-    Ok((0, chunk))
-}
-
-fn parse_chunk(input: &mut LocatingSlice<Partial<&[u8]>>) -> WResult<(usize, Chunk)> {
-    let fourcc: [u8; 4] = take(4usize)
+fn parse_form_chunk(input: &mut Stream) -> WResult<Parsed> {
+    let file_size = be_u32(input)?;
+    let pak_type_bytes: [u8; 4] = take(4usize)
         .parse_next(input)?
         .try_into()
         .expect("winnow should have returned a 4-byte buffer");
-
-    match &fourcc {
-        b"FORM" => parse_form_chunk(input),
-        b"HEAD" => parse_head_chunk(input),
-        b"DATA" => parse_data_chunk(input),
-        b"FILE" => parse_file_chunk(input),
+    let pak_file_type = match &pak_type_bytes {
+        b"PAC1" => PakType::PAC1,
         unk => {
-            panic!("Unknown chunk: {:?} {}", unk, input.previous_token_end());
+            panic!("unknown pak type: {:?}", unk);
         }
-    }
+    };
+
+    Ok(Parsed::Chunk(Chunk::Form { file_size, pak_file_type }))
+}
+
+fn parse_head_chunk(input: &mut Stream) -> WResult<Parsed> {
+    let head_start = input.checkpoint();
+    let header_len = be_u32.parse_next(input)? as usize;
+    assert_eq!(header_len, 0x1c);
+
+    let mut skip_bytes = 0;
+
+    let header_data_start = input.checkpoint();
+    let version = le_u32.parse_next(input)?;
+    let unknown_data_start = input.checkpoint();
+    skip_bytes += unknown_data_start.offset_from(&header_data_start);
+
+    let unknown_data_offset = unknown_data_start.offset_from(&head_start);
+
+    let chunk = Chunk::Head {
+        version,
+        unknown_data: unknown_data_offset..(unknown_data_offset + skip_bytes),
+    };
+
+    Ok(Parsed::ChunkAndSkip(header_len - skip_bytes, chunk))
+}
+
+fn parse_data_chunk(input: &mut Stream) -> WResult<Parsed> {
+    let data_chunk_start = input.checkpoint();
+    let data_len = be_u32.parse_next(input)? as usize;
+
+    let data_data_start = input.checkpoint();
+    let data_data_offset = data_data_start.offset_from(&data_chunk_start);
+    //take(data_len).void().parse_next(input)?;
+
+    let chunk = Chunk::Data { data: data_data_offset..(data_data_offset + data_len) };
+
+    Ok(Parsed::ChunkAndSkip(data_len, chunk))
+}
+
+fn parse_file_chunk(input: &mut Stream) -> WResult<Parsed> {
+    let chunk_len = be_u32(input)? as usize;
+    Ok(Parsed::FileChunkHeader { chunk_len })
+}
+
+fn parse_chunk(input: &mut Stream) -> WResult<Parsed> {
+    alt((
+        (b"FORM", parse_form_chunk)
+            .context(StrContext::Label("chunk"))
+            .context(StrContext::Expected(winnow::error::StrContextValue::Description("FORM"))),
+        (b"HEAD", parse_head_chunk)
+            .context(StrContext::Label("chunk"))
+            .context(StrContext::Expected(winnow::error::StrContextValue::Description("HEAD"))),
+        (b"DATA", parse_data_chunk)
+            .context(StrContext::Label("chunk"))
+            .context(StrContext::Expected(winnow::error::StrContextValue::Description("DATA"))),
+        (b"FILE", parse_file_chunk)
+            .context(StrContext::Label("chunk"))
+            .context(StrContext::Expected(winnow::error::StrContextValue::Description("FILE"))),
+    ))
+    .parse_next(input)
+    .map(|(_, parsed)| parsed)
 }

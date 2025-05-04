@@ -9,6 +9,8 @@ use enfusion_pak::Chunk;
 use enfusion_pak::FileEntry;
 use enfusion_pak::FileEntryMeta;
 use enfusion_pak::PakFile;
+use enfusion_pak::PakParser;
+use enfusion_pak::ParserStateMachine;
 use enfusion_pak::pak_vfs::PakVfs;
 use humansize::BINARY;
 use humansize::format_size;
@@ -17,6 +19,9 @@ use vfs::FileSystem;
 use vfs::MemoryFS;
 use vfs::OverlayFS;
 use vfs::VfsPath;
+use winnow::LocatingSlice;
+use winnow::Partial;
+use winnow::stream::Location;
 
 /// Simple program to greet a person
 #[derive(Parser, Debug)]
@@ -60,8 +65,18 @@ fn parse_pak_files<P: AsRef<Path>>(files: &[P], args: &Args) -> color_eyre::Resu
         let file = std::fs::File::open(file_path)?;
         let mmap = unsafe { memmap2::Mmap::map(&file)? };
 
-        let pak_file = PakFile::parse(&mmap)?;
-        parsed_files.push(WrappedPakFile { path: file_path.to_path_buf(), source: mmap, pak_file });
+        match PakFile::parse(&mmap) {
+            Ok(pak_file) => {
+                parsed_files.push(WrappedPakFile {
+                    path: file_path.to_path_buf(),
+                    source: mmap,
+                    pak_file,
+                });
+            }
+            Err(e) => {
+                eprintln!("Error parsing {:?}: {:?}", file_path, e);
+            }
+        }
     }
 
     if args.merged {
@@ -171,9 +186,9 @@ fn print_pak_file(pak_file: &PakFile, args: &Args) -> color_eyre::Result<()> {
                 println!("\tSize: {} ({} bytes)", format_size(*file_size, BINARY), *file_size);
                 println!("\tVersion: {:?}", *pak_file_type);
             }
-            Chunk::Head { version, header_data } => {
+            Chunk::Head { version, unknown_data } => {
                 println!("\tVersion: {:#X}", *version);
-                println!("\tUnknown Data Len: {} bytes", header_data.len());
+                println!("\tUnknown Data Len: {} bytes", (unknown_data.end - unknown_data.start));
             }
             Chunk::Data { data } => {
                 println!("\tSize: {} ({} bytes)", format_size(data.len(), BINARY), data.len());

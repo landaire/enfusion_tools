@@ -28,7 +28,7 @@ log = "0.4.27"
 
 # You only need serde if you want app persistence:
 serde = { version = "1.0.219", features = ["derive"] }
-rfd = "0.15.3"
+rfd = { version = "0.15.3", features = ["file-handle-inner"] }
 egui_inbox = "0.8.0"
 enfusion_pak = { version = "*", path = "../enfusion_pak" }
 itertools = "0.14.0"
@@ -44,6 +44,7 @@ memmap2 = "0.9.5"
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wasm-bindgen-futures = "0.4.50"
 web-sys = "0.3.70"              # to access the DOM (to hide the loading text)
+circular = "0.3.0"
 
 [features]
 default = []
