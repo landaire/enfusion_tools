@@ -212,7 +212,7 @@ pub fn start_background_thread(
         //     let task_queue = task_queue;
         //     process_background_messages(inbox, task_queue)
         // });
-        return (sender, None);
+        (sender, None)
     }
 
     #[cfg(target_arch = "wasm32")]
