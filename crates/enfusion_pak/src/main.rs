@@ -4,6 +4,7 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::rc::Rc;
 
+use async_trait::async_trait;
 use clap::Parser;
 use enfusion_pak::Chunk;
 use enfusion_pak::FileEntry;
@@ -11,7 +12,9 @@ use enfusion_pak::FileEntryMeta;
 use enfusion_pak::PakFile;
 use enfusion_pak::PakParser;
 use enfusion_pak::ParserStateMachine;
+use enfusion_pak::async_pak_vfs::AsyncPrime;
 use enfusion_pak::pak_vfs::PakVfs;
+use enfusion_pak::pak_vfs::Prime;
 use humansize::BINARY;
 use humansize::format_size;
 use memmap2::Mmap;
@@ -51,9 +54,16 @@ impl AsRef<PakFile> for WrappedPakFile {
     }
 }
 
-impl AsRef<[u8]> for WrappedPakFile {
-    fn as_ref(&self) -> &[u8] {
-        &self.source
+impl Prime for WrappedPakFile {
+    fn prime_file(&self, file_range: std::ops::Range<usize>) -> impl AsRef<[u8]> {
+        &self.source[file_range]
+    }
+}
+
+#[async_trait]
+impl AsyncPrime for WrappedPakFile {
+    async fn prime_file(&self, file_range: std::ops::Range<usize>) -> impl AsRef<[u8]> {
+        &self.source[file_range]
     }
 }
 

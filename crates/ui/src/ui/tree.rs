@@ -5,7 +5,9 @@ use egui::Sense;
 use egui::Ui;
 use enfusion_pak::vfs::OverlayFS;
 use enfusion_pak::vfs::VfsPath;
+use enfusion_pak::vfs::async_vfs::AsyncVfsPath;
 use itertools::Itertools;
+use log::debug;
 
 use crate::EnfusionToolsApp;
 
@@ -17,14 +19,17 @@ impl EnfusionToolsApp {
                     let file_label = ui.add(Label::new(child.filename()).sense(Sense::click()));
                     // self.add_view_file_menu(&file_label, node);
                     if file_label.double_clicked() {
-                        let file_result = child
-                            .open_file()
-                            .ok()
-                            .map(|mut file| std::io::read_to_string(&mut file));
-
-                        if let Some(Ok(opened_file)) = file_result {
-                            self.internal.opened_file_text = opened_file;
-                            self.opened_file_path = Some(node.as_str().to_string());
+                        debug!("file double-clicked");
+                        if let Some(task_queue) = self.internal.task_queue.as_ref() {
+                            debug!("sending task");
+                            // Get the async version of this file
+                            let _ = task_queue.send(crate::task::BackgroundTask::LoadFileData(
+                                child.clone(),
+                                self.internal
+                                    .async_overlay_fs
+                                    .clone()
+                                    .expect("no async overlay FS?"),
+                            ));
                         }
                     }
                 } else {

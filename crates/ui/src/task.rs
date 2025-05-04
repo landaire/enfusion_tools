@@ -15,30 +15,39 @@ use enfusion_pak::PakFile;
 use enfusion_pak::error::PakError;
 use enfusion_pak::pak_vfs::PakVfs;
 use enfusion_pak::vfs::VfsPath;
+use enfusion_pak::vfs::async_vfs::AsyncFileSystem;
+use enfusion_pak::vfs::async_vfs::AsyncOverlayFS;
+use enfusion_pak::vfs::async_vfs::AsyncVfsPath;
+use enfusion_pak::vfs::async_vfs::impls::overlay;
+use futures::StreamExt;
+use log::debug;
 use regex::Regex;
 
+use crate::pak_wrapper::WrappedPakFile;
 use crate::pak_wrapper::parse_pak_file;
 
 #[derive(Debug)]
 pub enum BackgroundTaskMessage {
-    LoadPakFiles(Result<Vec<VfsPath>, PakError>),
+    LoadedPakFiles(Result<Vec<PakVfs<Arc<WrappedPakFile>>>, PakError>),
+    FileDataLoaded(VfsPath, Vec<u8>),
     SearchResult(SearchResult),
 }
 
 pub enum BackgroundTask {
     /// Requests the background thread to begin parsing PAK files.
     LoadPakFiles(Vec<FileReference>),
-    PerformSearch(VfsPath, String),
+    PerformSearch(AsyncVfsPath, String),
+    LoadFileData(VfsPath, AsyncVfsPath),
 }
 
 #[derive(Debug)]
 pub struct SearchResult {
-    pub file: VfsPath,
+    pub file: AsyncVfsPath,
     pub matches: Vec<String>,
 }
 
-pub fn perform_search(
-    start_path: VfsPath,
+pub async fn perform_search(
+    start_path: AsyncVfsPath,
     query: String,
     search_stop: Arc<AtomicBool>,
     results_sender: egui_inbox::UiInboxSender<BackgroundTaskMessage>,
@@ -56,9 +65,10 @@ pub fn perform_search(
             break;
         }
 
-        if next.is_dir().ok().unwrap_or_default() {
-            for child in next.read_dir().expect("failed to read dir") {
-                if child.is_file().ok().unwrap_or_default() {
+        if next.is_dir().await.ok().unwrap_or_default() {
+            let mut stream = next.read_dir().await.expect("failed to read dir");
+            while let Some(child) = stream.next().await {
+                if child.is_file().await.ok().unwrap_or_default() {
                     // If this file doesn't have an extension that we believe to be a text
                     // file, let's ignore it
                     if let Some("c" | "et" | "conf" | "layout") = child.extension().as_deref() {
@@ -73,8 +83,11 @@ pub fn perform_search(
         }
 
         // Handle files
-        let mut data = Vec::with_capacity(next.metadata().expect("no metadata").len as usize);
-        if let Err(e) = std::io::copy(&mut next.open_file().expect("could not open"), &mut data) {
+        let mut data = Vec::with_capacity(next.metadata().await.expect("no metadata").len as usize);
+        if let Err(e) =
+            async_std::io::copy(&mut next.open_file().await.expect("could not open"), &mut data)
+                .await
+        {
             eprintln!("Failed to read data for file {}: {:?}", next.as_str(), e);
             continue;
         }
@@ -178,7 +191,7 @@ pub fn perform_search(
 
 #[cfg(target_arch = "wasm32")]
 #[repr(transparent)]
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct FileReference(pub rfd::FileHandle);
 #[cfg(target_arch = "wasm32")]
 unsafe impl Send for FileReference {}
@@ -186,7 +199,7 @@ unsafe impl Sync for FileReference {}
 
 #[cfg(not(target_arch = "wasm32"))]
 #[repr(transparent)]
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct FileReference(pub PathBuf);
 
 pub fn start_background_thread(
@@ -201,6 +214,11 @@ pub fn start_background_thread(
             let task_queue = task_queue;
             process_background_messages(inbox, &task_queue);
         });
+        // execute(async move {
+        //     // Force a move into this thread
+        //     let task_queue = task_queue;
+        //     process_background_messages(inbox, task_queue)
+        // });
         return (sender, None);
     }
 
@@ -219,8 +237,10 @@ pub fn process_background_messages(
     let mut search_stop = Arc::new(AtomicBool::new(false));
     #[cfg(not(target_arch = "wasm32"))]
     let get_message = || task_queue.recv();
+
     #[cfg(target_arch = "wasm32")]
     let get_message = || task_queue.try_recv();
+
     while let Ok(task) = get_message() {
         match task {
             BackgroundTask::LoadPakFiles(handles) => {
@@ -233,11 +253,11 @@ pub fn process_background_messages(
                             match Ok(parse_pak_file(handle).await) {
                                 Ok(parsed_file) => {
                                     let vfs = PakVfs::new(Arc::new(parsed_file));
-                                    parsed_files.push(VfsPath::new(vfs));
+                                    parsed_files.push(vfs);
                                 }
                                 Err(e) => {
                                     inbox
-                                        .send(BackgroundTaskMessage::LoadPakFiles(Err(e)))
+                                        .send(BackgroundTaskMessage::LoadedPakFiles(Err(e)))
                                         .expect("failed to send completion");
                                 }
                             }
@@ -251,7 +271,7 @@ pub fn process_background_messages(
                                 }
                                 Err(e) => {
                                     inbox
-                                        .send(BackgroundTaskMessage::LoadPakFiles(Err(e)))
+                                        .send(BackgroundTaskMessage::LoadedPakFiles(Err(e)))
                                         .expect("failed to send completion");
                                 }
                             }
@@ -259,7 +279,7 @@ pub fn process_background_messages(
                     }
 
                     inbox
-                        .send(BackgroundTaskMessage::LoadPakFiles(Ok(parsed_files)))
+                        .send(BackgroundTaskMessage::LoadedPakFiles(Ok(parsed_files)))
                         .expect("failed to send completion");
                 });
             }
@@ -279,7 +299,37 @@ pub fn process_background_messages(
                     perform_search(start_path, query, thread_stopper, thread_sender);
                 });
                 #[cfg(target_arch = "wasm32")]
-                perform_search(start_path, query, thread_stopper, thread_sender);
+                execute(async move {
+                    perform_search(start_path, query, thread_stopper, thread_sender).await;
+                });
+            }
+            BackgroundTask::LoadFileData(vfs_path, overlay_fs) => {
+                debug!("Got a LoadFileData task");
+                let sender = inbox.clone();
+                execute(async move {
+                    let async_vfs_path = overlay_fs
+                        .join(vfs_path.as_str())
+                        .expect("could not map sync path to async path");
+
+                    debug!("got the async vfs path: {:?}", async_vfs_path);
+                    let metadata = async_vfs_path.metadata().await;
+                    debug!("meta: {:?}", metadata);
+                    if let Ok(metadata) = metadata {
+                        if let Ok(mut reader) = async_vfs_path.open_file().await {
+                            let mut file_data = Vec::with_capacity(metadata.len as usize);
+                            debug!("got the reader");
+
+                            async_std::io::copy(&mut reader, &mut file_data)
+                                .await
+                                .expect("faile dto copy data");
+
+                            debug!("sending data back to UI thread");
+
+                            let _ = sender
+                                .send(BackgroundTaskMessage::FileDataLoaded(vfs_path, file_data));
+                        }
+                    }
+                });
             }
         }
     }

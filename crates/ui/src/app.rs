@@ -7,6 +7,9 @@ use egui_code_editor::Syntax;
 use enfusion_pak::vfs::MemoryFS;
 use enfusion_pak::vfs::OverlayFS;
 use enfusion_pak::vfs::VfsPath;
+use enfusion_pak::vfs::async_vfs::AsyncMemoryFS;
+use enfusion_pak::vfs::async_vfs::AsyncOverlayFS;
+use enfusion_pak::vfs::async_vfs::AsyncVfsPath;
 
 use crate::task::BackgroundTask;
 use crate::task::BackgroundTaskMessage;
@@ -18,12 +21,14 @@ use crate::task::start_background_thread;
 pub(crate) struct Internal {
     inbox: egui_inbox::UiInbox<BackgroundTaskMessage>,
 
-    task_queue: Option<mpsc::Sender<BackgroundTask>>,
+    pub(crate) task_queue: Option<mpsc::Sender<BackgroundTask>>,
     task_queue_rx: Option<mpsc::Receiver<BackgroundTask>>,
 
     pub(crate) pak_files: Vec<VfsPath>,
+    pub(crate) async_pak_files: Vec<AsyncVfsPath>,
 
     pub(crate) overlay_fs: Option<VfsPath>,
+    pub(crate) async_overlay_fs: Option<AsyncVfsPath>,
 
     pub(crate) opened_file_text: String,
 }
@@ -55,7 +60,9 @@ impl Default for EnfusionToolsApp {
                 task_queue: None,
                 task_queue_rx: None,
                 pak_files: Vec::new(),
+                async_pak_files: Vec::new(),
                 overlay_fs: None,
+                async_overlay_fs: None,
                 opened_file_text: "".to_string(),
             },
             opened_file_path: None,
@@ -102,6 +109,50 @@ impl EnfusionToolsApp {
 
         app
     }
+
+    pub fn process_background_message(&mut self, message: BackgroundTaskMessage) {
+        match message {
+            BackgroundTaskMessage::LoadedPakFiles(files) => match files {
+                Ok(mut files) => {
+                    self.internal.pak_files.clear();
+                    self.internal.pak_files.push(VfsPath::new(MemoryFS::new()));
+
+                    self.internal.async_pak_files.clear();
+                    self.internal.async_pak_files.push(AsyncVfsPath::new(AsyncMemoryFS::new()));
+
+                    for file in files {
+                        self.internal.pak_files.push(VfsPath::new(file.clone()));
+                        self.internal.async_pak_files.push(AsyncVfsPath::new(file.clone()));
+                    }
+
+                    self.internal.overlay_fs =
+                        Some(VfsPath::new(OverlayFS::new(self.internal.pak_files.as_slice())));
+                    self.internal.async_overlay_fs = Some(AsyncVfsPath::new(AsyncOverlayFS::new(
+                        self.internal.async_pak_files.as_slice(),
+                    )));
+                }
+                Err(e) => {
+                    eprintln!("failed to load pak files: {:?}", e);
+                }
+            },
+            BackgroundTaskMessage::SearchResult(search_rx) => {
+                self.internal.opened_file_text += search_rx.file.as_str();
+                for m in search_rx.matches {
+                    self.internal.opened_file_text += &m;
+                    self.internal.opened_file_text += "\n...";
+                }
+                self.internal.opened_file_text += "\n";
+            }
+            BackgroundTaskMessage::FileDataLoaded(async_vfs_path, items) => {
+                // Try reading this as text
+                let Ok(str_data) = String::from_utf8(items) else {
+                    return;
+                };
+
+                self.internal.opened_file_text = str_data;
+            }
+        }
+    }
 }
 
 impl eframe::App for EnfusionToolsApp {
@@ -120,29 +171,7 @@ impl eframe::App for EnfusionToolsApp {
         }
 
         while let Some(message) = self.internal.inbox.read_without_ctx().next() {
-            match message {
-                BackgroundTaskMessage::LoadPakFiles(files) => match files {
-                    Ok(mut files) => {
-                        self.internal.pak_files.clear();
-                        self.internal.pak_files.push(VfsPath::new(MemoryFS::new()));
-                        self.internal.pak_files.append(&mut files);
-
-                        self.internal.overlay_fs =
-                            Some(VfsPath::new(OverlayFS::new(self.internal.pak_files.as_slice())));
-                    }
-                    Err(e) => {
-                        eprintln!("failed to load pak files: {:?}", e);
-                    }
-                },
-                BackgroundTaskMessage::SearchResult(search_rx) => {
-                    self.internal.opened_file_text += search_rx.file.as_str();
-                    for m in search_rx.matches {
-                        self.internal.opened_file_text += &m;
-                        self.internal.opened_file_text += "\n...";
-                    }
-                    self.internal.opened_file_text += "\n";
-                }
-            }
+            self.process_background_message(message);
         }
 
         // Put your widgets into a `SidePanel`, `TopBottomPanel`, `CentralPanel`, `Window` or `Area`.
@@ -189,7 +218,9 @@ impl eframe::App for EnfusionToolsApp {
                                         background_task_sender.send(BackgroundTask::LoadPakFiles(
                                             files
                                                 .drain(..)
-                                                .map(|handle| FileReference(handle.path.to_owned()))
+                                                .map(|handle| {
+                                                    FileReference(handle.path().to_owned())
+                                                })
                                                 .collect(),
                                         ));
                                 }
@@ -199,8 +230,9 @@ impl eframe::App for EnfusionToolsApp {
                     ui.label("Search");
                     if ui.text_edit_singleline(&mut self.search_query).changed() {
                         if let Some(task_queue) = &self.internal.task_queue {
-                            if let Some(vfs_root) = self.internal.overlay_fs.clone() {
-                                task_queue.send(BackgroundTask::PerformSearch(
+                            if let Some(vfs_root) = self.internal.async_overlay_fs.clone() {
+                                self.internal.opened_file_text.clear();
+                                let _ = task_queue.send(BackgroundTask::PerformSearch(
                                     vfs_root,
                                     self.search_query.clone(),
                                 ));

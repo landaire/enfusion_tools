@@ -1,95 +1,52 @@
-use std::fmt::Debug;
-use std::io::Cursor;
-use std::ops::Range;
-use vfs::FileSystem;
-use vfs::VfsError;
-use vfs::VfsMetadata;
-use vfs::error::VfsErrorKind;
+use async_trait::async_trait;
+use std::{fmt::Debug, ops::Range};
+use vfs::{
+    VfsError, VfsMetadata, VfsResult,
+    async_vfs::{AsyncFileSystem, SeekAndRead},
+    error::VfsErrorKind,
+};
 
-use crate::FileEntry;
-use crate::FileEntryMeta;
-use crate::PakFile;
+use crate::{FileEntryMeta, PakFile, pak_vfs::PakVfs};
 
-pub trait Prime {
-    fn prime_file(&self, file_range: Range<usize>) -> impl AsRef<[u8]>;
+use async_std::{
+    io::{Cursor, Write},
+    stream::{self, Stream},
+};
+
+#[async_trait]
+pub trait AsyncPrime {
+    async fn prime_file(&self, file_range: Range<usize>) -> impl AsRef<[u8]>;
 }
 
-#[derive(Debug, Clone)]
-pub struct PakVfs<T> {
-    pub(crate) source: T,
-}
-
-impl<T> PakVfs<T> {
-    pub fn new(source: T) -> Self {
-        Self { source }
-    }
-}
-
-impl<T> PakVfs<T>
-where
-    T: std::ops::Deref,
-    T::Target: AsRef<PakFile>,
-{
-    pub fn entry_at(&self, path: &str) -> vfs::VfsResult<&FileEntry> {
-        let pak: &PakFile = self.source.as_ref();
-        let Some(crate::Chunk::File { fs }) = pak.file_chunk() else {
-            panic!("failed to find file chunk")
-        };
-
-        let mut current: &FileEntry = fs;
-
-        let path_parts = if path.starts_with("/") {
-            path.split('/').skip(1)
-        } else {
-            #[allow(clippy::iter_skip_zero)]
-            path.split('/').skip(0)
-        };
-
-        for part in path_parts {
-            if part.is_empty() {
-                continue;
-            }
-
-            let FileEntryMeta::Folder { children } = current.meta() else {
-                return Err(VfsError::from(VfsErrorKind::NotSupported));
-            };
-
-            if let Some(next) = children.iter().find(|child| child.name() == part) {
-                current = next;
-            } else {
-                return Err(VfsError::from(VfsErrorKind::FileNotFound));
-            }
-        }
-
-        Ok(current)
-    }
-}
-
-impl<T> FileSystem for PakVfs<T>
+#[async_trait]
+impl<T> AsyncFileSystem for PakVfs<T>
 where
     T: std::ops::Deref + Sync + Send + Debug + 'static,
-    T::Target: AsRef<PakFile> + Prime,
+    T::Target: AsRef<PakFile> + AsyncPrime,
 {
-    fn read_dir(&self, path: &str) -> vfs::VfsResult<Box<dyn Iterator<Item = String> + Send>> {
+    async fn read_dir(
+        &self,
+        path: &str,
+    ) -> VfsResult<Box<dyn Unpin + Stream<Item = String> + Send>> {
         let entry = self.entry_at(path)?;
 
         match entry.meta() {
-            FileEntryMeta::Folder { children } => Ok(Box::new(
+            FileEntryMeta::Folder { children } => Ok(Box::new(stream::from_iter(
                 children
                     .iter()
                     .map(|child| child.name().to_string())
                     .collect::<Vec<_>>()
                     .into_iter(),
-            )),
+            ))),
             FileEntryMeta::File { .. } => Err(VfsError::from(VfsErrorKind::NotSupported)),
         }
     }
 
-    fn create_dir(&self, path: &str) -> vfs::VfsResult<()> {
+    async fn create_dir(&self, path: &str) -> vfs::VfsResult<()> {
         todo!()
     }
 
-    fn open_file(&self, path: &str) -> vfs::VfsResult<Box<dyn vfs::SeekAndRead + Send>> {
+    async fn open_file(&self, path: &str) -> VfsResult<Box<dyn SeekAndRead + Send + Unpin>> {
         let entry = self.entry_at(path)?;
         let FileEntryMeta::File { offset, compressed_len, decompressed_len, compressed, .. } =
             entry.meta()
@@ -101,7 +58,7 @@ where
         let data_start = *offset as usize;
         let data_end = data_start + *compressed_len as usize;
 
-        let primed_file = self.source.prime_file(data_start..data_end);
+        let primed_file = self.source.prime_file(data_start..data_end).await;
         let source_slice: &[u8] = primed_file.as_ref();
         let mut source_range = source_slice;
         if *compressed != 0 {
@@ -120,15 +77,15 @@ where
         }
     }
 
-    fn create_file(&self, path: &str) -> vfs::VfsResult<Box<dyn vfs::SeekAndWrite + Send>> {
+    async fn create_file(&self, path: &str) -> VfsResult<Box<dyn Write + Send + Unpin>> {
         todo!()
     }
 
-    fn append_file(&self, path: &str) -> vfs::VfsResult<Box<dyn vfs::SeekAndWrite + Send>> {
+    async fn append_file(&self, path: &str) -> VfsResult<Box<dyn Write + Send + Unpin>> {
         todo!()
     }
 
-    fn metadata(&self, path: &str) -> vfs::VfsResult<vfs::VfsMetadata> {
+    async fn metadata(&self, path: &str) -> vfs::VfsResult<vfs::VfsMetadata> {
         let entry = self.entry_at(path)?;
 
         let pak_meta = entry.meta();
@@ -166,7 +123,7 @@ where
         Ok(meta)
     }
 
-    fn exists(&self, path: &str) -> vfs::VfsResult<bool> {
+    async fn exists(&self, path: &str) -> vfs::VfsResult<bool> {
         if self.entry_at(path).is_ok() {
             return Ok(true);
         }
@@ -174,19 +131,15 @@ where
         Ok(false)
     }
 
-    fn remove_file(&self, path: &str) -> vfs::VfsResult<()> {
+    async fn remove_file(&self, path: &str) -> vfs::VfsResult<()> {
         todo!()
     }
 
-    fn remove_dir(&self, path: &str) -> vfs::VfsResult<()> {
+    async fn remove_dir(&self, path: &str) -> vfs::VfsResult<()> {
         todo!()
     }
 
-    fn set_creation_time(&self, _path: &str, _time: std::time::SystemTime) -> vfs::VfsResult<()> {
-        Err(vfs::VfsError::from(vfs::error::VfsErrorKind::NotSupported))
-    }
-
-    fn set_modification_time(
+    async fn set_creation_time(
         &self,
         _path: &str,
         _time: std::time::SystemTime,
@@ -194,19 +147,31 @@ where
         Err(vfs::VfsError::from(vfs::error::VfsErrorKind::NotSupported))
     }
 
-    fn set_access_time(&self, _path: &str, _time: std::time::SystemTime) -> vfs::VfsResult<()> {
+    async fn set_modification_time(
+        &self,
+        _path: &str,
+        _time: std::time::SystemTime,
+    ) -> vfs::VfsResult<()> {
         Err(vfs::VfsError::from(vfs::error::VfsErrorKind::NotSupported))
     }
 
-    fn copy_file(&self, _src: &str, _dest: &str) -> vfs::VfsResult<()> {
+    async fn set_access_time(
+        &self,
+        _path: &str,
+        _time: std::time::SystemTime,
+    ) -> vfs::VfsResult<()> {
+        Err(vfs::VfsError::from(vfs::error::VfsErrorKind::NotSupported))
+    }
+
+    async fn copy_file(&self, _src: &str, _dest: &str) -> vfs::VfsResult<()> {
         Err(vfs::error::VfsErrorKind::NotSupported.into())
     }
 
-    fn move_file(&self, _src: &str, _dest: &str) -> vfs::VfsResult<()> {
+    async fn move_file(&self, _src: &str, _dest: &str) -> vfs::VfsResult<()> {
         Err(vfs::error::VfsErrorKind::NotSupported.into())
     }
 
-    fn move_dir(&self, _src: &str, _dest: &str) -> vfs::VfsResult<()> {
+    async fn move_dir(&self, _src: &str, _dest: &str) -> vfs::VfsResult<()> {
         Err(vfs::error::VfsErrorKind::NotSupported.into())
     }
 }

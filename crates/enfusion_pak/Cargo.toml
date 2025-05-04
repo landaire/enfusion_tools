@@ -23,7 +23,10 @@ ouroboros = "0.18.5"
 flate2 = "1.1.1"
 wasm-bindgen-futures = "0.4.50"
 log = "0.4.27"
+async-trait = "0.1.88"
+async-std = "1.13.1"
 
 [features]
 default = []
+async_vfs = ["vfs/async-vfs"]
 bin = ["dep:clap", "dep:color-eyre", "dep:memmap2", "dep:humansize"]

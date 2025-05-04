@@ -1,5 +1,7 @@
 use std::path::PathBuf;
 
+use async_trait::async_trait;
+use enfusion_pak::pak_vfs::Prime;
 use enfusion_pak::{PakFile, error::PakError};
 use memmap2::Mmap;
 
@@ -16,9 +18,16 @@ impl AsRef<PakFile> for WrappedPakFile {
     }
 }
 
-impl AsRef<[u8]> for WrappedPakFile {
-    fn as_ref(&self) -> &[u8] {
-        &self.source
+impl Prime for WrappedPakFile {
+    fn prime_file(&self, file_range: std::ops::Range<usize>) -> impl AsRef<[u8]> {
+        &self.source[file_range]
+    }
+}
+
+#[async_trait]
+impl AsyncPrime for WrappedPakFile {
+    async fn prime_file(&self, file_range: std::ops::Range<usize>) -> impl AsRef<[u8]> {
+        &self.source[file_range]
     }
 }
 

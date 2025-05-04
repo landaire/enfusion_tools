@@ -1,14 +1,27 @@
 use std::{
+    collections::HashMap,
     io::{Read, Seek},
     path::PathBuf,
+    pin::Pin,
+    sync::{Arc, Mutex},
 };
 
+use async_trait::async_trait;
 use eframe::wasm_bindgen::prelude::Closure;
 use enfusion_pak::{
     PakFile, PakParser, ParserStateMachine, Stream,
+    async_pak_vfs::AsyncPrime,
+    pak_vfs::Prime,
     winnow::{
         error::{ErrMode, Needed},
         stream::{Offset, Stream as _},
+    },
+};
+use futures::{
+    SinkExt,
+    channel::{
+        mpsc,
+        oneshot::{self, Canceled},
     },
 };
 use log::debug;
@@ -17,7 +30,7 @@ use wasm_bindgen::{JsCast, JsValue};
 use wasm_bindgen_futures::JsFuture;
 use web_sys::{File, FileReader, js_sys};
 
-use crate::task::FileReference;
+use crate::task::{FileReference, execute};
 
 const BUFFER_SIZE_BYTES: usize = 1024 * 1024 * 20;
 
@@ -25,7 +38,7 @@ const BUFFER_SIZE_BYTES: usize = 1024 * 1024 * 20;
 pub struct WrappedPakFile {
     path: PathBuf,
     handle: FileReference,
-    buffer: oval::Buffer,
+    buffer: Mutex<HashMap<std::ops::Range<usize>, BufferWrapper>>,
     pak_file: PakFile,
     pos: usize,
 }
@@ -36,20 +49,84 @@ impl AsRef<PakFile> for WrappedPakFile {
     }
 }
 
-impl AsRef<[u8]> for WrappedPakFile {
+#[repr(transparent)]
+#[derive(Clone, Debug)]
+struct BufferWrapper(Arc<oval::Buffer>);
+
+impl AsRef<[u8]> for BufferWrapper {
     fn as_ref(&self) -> &[u8] {
-        &self.buffer.data()
+        self.0.data()
+    }
+}
+
+impl Prime for WrappedPakFile {
+    fn prime_file(&self, _file_range: std::ops::Range<usize>) -> impl AsRef<[u8]> {
+        if false {
+            panic!("PAK files cannot be primed in WASM")
+        } else {
+            BufferWrapper(Arc::new(oval::Buffer::with_capacity(0)))
+        }
+    }
+}
+
+#[async_trait]
+impl AsyncPrime for WrappedPakFile {
+    async fn prime_file(&self, file_range: std::ops::Range<usize>) -> impl AsRef<[u8]> {
+        debug!("attempting to prime file");
+        {
+            let buffers = self.buffer.lock().unwrap();
+
+            if let Some(entry) = buffers.get(&file_range) {
+                return entry.clone();
+            }
+        }
+
+        let file_size = file_range.end - file_range.start;
+
+        let (tx, rx) = oneshot::channel();
+        let handle = self.handle.clone();
+        execute(async move {
+            let data = read_file_slice(handle, file_range.start as u64, file_range.end as u64)
+                .await
+                .expect("failed to read buffer");
+
+            tx.send(data);
+        });
+
+        if let Ok(data) = rx.await {
+            let mut buffer = oval::Buffer::with_capacity(file_size);
+            let mut data = data.as_slice();
+            let mut buffer_slice = buffer.space();
+            let read =
+                std::io::copy(&mut data, &mut buffer_slice).expect("failed to copy to buffer");
+            buffer.fill(read as usize);
+
+            let mut buffers = self.buffer.lock().unwrap();
+            let entry =
+                buffers.entry(file_range.clone()).insert_entry(BufferWrapper(Arc::new(buffer)));
+
+            entry.get().clone()
+        } else {
+            panic!("failed to receive data");
+        }
     }
 }
 
 // Asynchronously read a slice from a JS File object
-pub async fn read_file_slice(file: &File, start: u64, end: u64) -> Result<Vec<u8>, JsValue> {
+pub async fn read_file_slice(
+    file_reference: FileReference,
+    start: u64,
+    end: u64,
+) -> Result<Vec<u8>, JsValue> {
     log::debug!("Performing a read from {start:#X} to {end:#X}");
 
     // Stolen from RFD's file reading implementation
+    let file = file_reference.clone();
     let promise = js_sys::Promise::new(&mut move |res, _rej| {
         // Create a slice of the file using the slice method
         let blob = file
+            .0
+            .inner()
             .slice_with_f64_and_f64(start as f64, end as f64)
             .expect("failed to create file blob");
 
@@ -90,7 +167,7 @@ pub async fn parse_pak_file(file_handle: FileReference) -> WrappedPakFile {
         //
         // TODO: fix this so we only load the minimum amount of data
         let data = read_file_slice(
-            file_handle.0.inner(),
+            file_handle.clone(),
             parser.bytes_parsed() as u64,
             (parser.bytes_parsed() + buffer.capacity()) as u64,
         )
@@ -115,7 +192,7 @@ pub async fn parse_pak_file(file_handle: FileReference) -> WrappedPakFile {
                 return WrappedPakFile {
                     path: file_handle.0.file_name().into(),
                     handle: file_handle,
-                    buffer: Buffer::with_capacity(16 * 4096),
+                    buffer: Default::default(),
                     pak_file,
                     pos: 0,
                 };
