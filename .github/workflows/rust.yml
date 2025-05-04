@@ -151,7 +151,7 @@ jobs:
     - name: Install cross for Windows
       if: ${{ contains(matrix.TARGET, 'windows') }}
       run: |
-        install_cross_windows.bat
+        .\install_cross_windows.bat
 
     - name: Build
       run: |
