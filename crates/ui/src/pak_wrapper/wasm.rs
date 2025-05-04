@@ -8,7 +8,7 @@ const BUFFER_SIZE_BYTES: usize = 1024 * 1024 * 20;
 pub struct WrappedPakFile {
     path: PathBuf,
     handle: rfd::FileHandle,
-    buffer: circular::Buffer,
+    buffer: oval::Buffer,
     pak_file: PakFile,
     pos: usize,
 }
@@ -22,14 +22,6 @@ impl AsRef<PakFile> for WrappedPakFile {
 impl AsRef<[u8]> for WrappedPakFile {
     fn as_ref(&self) -> &[u8] {
         &self.buffer.data()
-    }
-}
-
-impl Seek for WrappedPakFile {
-    fn seek(&mut self, pos: std::io::SeekFrom) -> std::io::Result<u64> {
-        let file = self.handle.inner();
-        let file_reader = web_sys::FileReader::new().unwrap();
-        file_reader.see
     }
 }
 

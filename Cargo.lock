@@ -738,12 +738,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "circular"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b0fc239e0f6cb375d2402d48afb92f76f5404fd1df208a41930ec81eda078bea"
-
-[[package]]
 name = "clap"
 version = "4.5.37"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2710,6 +2704,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "oval"
+version = "2.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "135cef32720c6746450d910890b0b69bcba2bbf6f85c9f4583df13fe415de828"
+
+[[package]]
 name = "owned_ttf_parser"
 version = "0.25.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3590,7 +3590,6 @@ dependencies = [
 name = "ui"
 version = "0.1.0"
 dependencies = [
- "circular",
  "eframe",
  "egui",
  "egui_code_editor",
@@ -3600,6 +3599,7 @@ dependencies = [
  "itertools",
  "log",
  "memmap2",
+ "oval",
  "regex",
  "rfd",
  "serde",

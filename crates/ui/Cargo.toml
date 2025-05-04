@@ -44,7 +44,7 @@ memmap2 = "0.9.5"
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wasm-bindgen-futures = "0.4.50"
 web-sys = "0.3.70"              # to access the DOM (to hide the loading text)
-circular = "0.3.0"
+oval = "2.0.0"
 
 [features]
 default = []

@@ -249,12 +249,6 @@ impl PakParser {
                     bytes_processed,
                     chunk_len,
                 } => {
-                    if bytes_processed + bytes_consumed > chunk_len - 100 {
-                        println!(
-                            "{bytes_processed:#X} processed, {} bytes remaining",
-                            chunk_len - bytes_processed + bytes_consumed
-                        );
-                    }
                     if bytes_processed + bytes_consumed == chunk_len {
                         assert_eq!(parents.len(), 1);
                         self.chunks.push(Chunk::File { fs: parents.pop().unwrap().entry });
@@ -296,7 +290,7 @@ impl PakParser {
                     Parsed::Chunk(chunk) => (0, Some(chunk), None),
                     Parsed::ChunkAndSkip(skip, chunk) => (skip, Some(chunk), None),
                     Parsed::FileChunkHeader { chunk_len } => {
-                        println!(
+                        debug!(
                             "We have {:#X} bytes to read starting at {:#X}",
                             chunk_len, self.bytes_parsed
                         );
