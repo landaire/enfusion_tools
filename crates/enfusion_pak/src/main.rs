@@ -2,7 +2,6 @@ use std::collections::VecDeque;
 use std::ffi::OsStr;
 use std::path::Path;
 use std::path::PathBuf;
-use std::rc::Rc;
 
 use async_trait::async_trait;
 use clap::Parser;
@@ -10,21 +9,11 @@ use enfusion_pak::Chunk;
 use enfusion_pak::FileEntry;
 use enfusion_pak::FileEntryMeta;
 use enfusion_pak::PakFile;
-use enfusion_pak::PakParser;
-use enfusion_pak::ParserStateMachine;
 use enfusion_pak::async_pak_vfs::AsyncPrime;
-use enfusion_pak::pak_vfs::PakVfs;
 use enfusion_pak::pak_vfs::Prime;
 use humansize::BINARY;
 use humansize::format_size;
 use memmap2::Mmap;
-use vfs::FileSystem;
-use vfs::MemoryFS;
-use vfs::OverlayFS;
-use vfs::VfsPath;
-use winnow::LocatingSlice;
-use winnow::Partial;
-use winnow::stream::Location;
 
 /// Simple program to greet a person
 #[derive(Parser, Debug)]
@@ -42,6 +31,7 @@ pub fn add_num(integers: &mut Vec<u32>) {
 }
 
 #[derive(Debug)]
+#[allow(unused)]
 struct WrappedPakFile {
     path: PathBuf,
     source: Mmap,
@@ -112,7 +102,7 @@ fn parse_pak_files<P: AsRef<Path>>(files: &[P], args: &Args) -> color_eyre::Resu
             merged_fs.merge(other_fs.clone());
         }
 
-        print_pak_file_chunk_details(merged_fs, None, args);
+        print_pak_file_chunk_details(merged_fs, args);
     } else {
         for (idx, pak) in parsed_files.iter().enumerate() {
             println!(
@@ -132,7 +122,7 @@ fn parse_pak_files<P: AsRef<Path>>(files: &[P], args: &Args) -> color_eyre::Resu
     Ok(())
 }
 
-fn print_pak_file_chunk_details(fs: &FileEntry, path: Option<&Path>, args: &Args) {
+fn print_pak_file_chunk_details(fs: &FileEntry, args: &Args) {
     let mut fs_queue = VecDeque::new();
     fs_queue.push_front((PathBuf::from("Root"), fs));
 
@@ -204,7 +194,7 @@ fn print_pak_file(pak_file: &PakFile, args: &Args) -> color_eyre::Result<()> {
                 println!("\tSize: {} ({} bytes)", format_size(data.len(), BINARY), data.len());
             }
             Chunk::File { fs } => {
-                print_pak_file_chunk_details(fs, None, args);
+                print_pak_file_chunk_details(fs, args);
             }
             Chunk::Unknown(_) => todo!(),
         }
@@ -215,7 +205,7 @@ fn print_pak_file(pak_file: &PakFile, args: &Args) -> color_eyre::Result<()> {
 }
 
 fn main() -> color_eyre::Result<()> {
-    let mut args = Args::parse();
+    let args = Args::parse();
 
     if !args.file.exists() {
         println!("File does not exist");
@@ -236,7 +226,5 @@ fn main() -> color_eyre::Result<()> {
         pak_files.push(args.file.clone());
     }
 
-    parse_pak_files(pak_files.as_ref(), &args);
-
-    Ok(())
+    parse_pak_files(pak_files.as_ref(), &args)
 }
