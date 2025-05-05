@@ -163,8 +163,8 @@ pub async fn read_file_slice(
 pub async fn parse_pak_file(file_handle: FileReference) -> WrappedPakFile {
     let mut parser = PakParser::new();
 
-    // 16k buffer size
-    let mut buffer = oval::Buffer::with_capacity(4096 * 16);
+    // 64k buffer size
+    let mut buffer = oval::Buffer::with_capacity(1024 * 64);
 
     loop {
         // Populate the buffer with the first 16k
