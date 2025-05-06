@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::collections::VecDeque;
@@ -24,6 +25,7 @@ pub enum BackgroundTaskMessage {
     LoadedPakFiles(Result<Vec<PakVfs<Arc<WrappedPakFile>>>, PakError>),
     FileDataLoaded(VfsPath, Vec<u8>),
     SearchResult(SearchResult),
+    FilesFiltered(Vec<VfsPath>),
 }
 
 pub enum BackgroundTask {
@@ -31,6 +33,7 @@ pub enum BackgroundTask {
     LoadPakFiles(Vec<FileReference>),
     PerformSearch(AsyncVfsPath, String),
     LoadFileData(VfsPath, AsyncVfsPath),
+    FilterPaths(VfsPath, String),
 }
 
 #[derive(Debug)]
@@ -207,11 +210,6 @@ pub fn start_background_thread(
             let task_queue = task_queue;
             process_background_messages(inbox, &task_queue);
         });
-        // execute(async move {
-        //     // Force a move into this thread
-        //     let task_queue = task_queue;
-        //     process_background_messages(inbox, task_queue)
-        // });
         (sender, None)
     }
 
@@ -324,8 +322,55 @@ pub fn process_background_messages(
                     }
                 });
             }
+            BackgroundTask::FilterPaths(vfs_path, query) => {
+                let mut matches = Vec::new();
+                let mut queue = vec![vfs_path];
+                let query_has_path = query.contains('/');
+                while let Some(next) = queue.pop() {
+                    let Ok(dir_iter) = next.read_dir() else { continue };
+                    for child in dir_iter {
+                        let haystack = if query_has_path {
+                            child.as_str()
+                        } else {
+                            let path = child.as_str();
+                            let index = path.rfind('/').map(|x| x + 1).unwrap_or(0);
+                            &path[index..]
+                        };
+
+                        if ascii_icontains(&query, haystack) {
+                            matches.push(child.clone());
+                        }
+
+                        queue.push(child);
+                    }
+                }
+
+                let _ = inbox.send(BackgroundTaskMessage::FilesFiltered(matches));
+            }
         }
     }
+}
+
+fn ascii_icontains(needle: &str, haystack: &str) -> bool {
+    if needle.is_empty() {
+        return true;
+    }
+    if haystack.is_empty() {
+        return false;
+    }
+
+    let needle_bytes = needle.as_bytes();
+    haystack.as_bytes().windows(needle_bytes.len()).any(|window| {
+        for i in 0..window.len() {
+            let haystack_c = window[i];
+            let needle_c = needle_bytes[i];
+            if (haystack_c & !0x20) != (needle_c & !0x20) {
+                return false;
+            }
+        }
+
+        true
+    })
 }
 
 #[cfg(not(target_arch = "wasm32"))]

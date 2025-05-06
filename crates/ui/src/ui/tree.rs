@@ -2,7 +2,9 @@ use egui::CollapsingHeader;
 use egui::Label;
 use egui::ScrollArea;
 use egui::Sense;
+use egui::TextEdit;
 use egui::Ui;
+use egui::Widget;
 use enfusion_pak::vfs::VfsPath;
 use itertools::Itertools;
 use log::debug;
@@ -10,10 +12,30 @@ use log::debug;
 use crate::EnfusionToolsApp;
 
 impl EnfusionToolsApp {
+    fn file_is_included_in_filter(&self, node: &VfsPath) -> bool {
+        if let Some(filtered_files) = self.internal.filtered_paths.as_ref() {
+            for filtered in filtered_files {
+                // If this is a parent of a filtered file or the filtered file iself,
+                // include this
+                if filtered.as_str().starts_with(node.as_str()) {
+                    return true;
+                }
+            }
+        } else {
+            // No filtered files means that everything is included.
+            return true;
+        }
+
+        false
+    }
     fn build_file_tree_node(&mut self, node: VfsPath, open: bool, ui: &mut Ui) -> bool {
         let mut open_state_changed = false;
         let header = CollapsingHeader::new(node.filename()).default_open(open).show(ui, |ui| {
             for child in node.read_dir().expect("??").sorted_by_key(|path| path.filename()) {
+                if !self.file_is_included_in_filter(&child) {
+                    continue;
+                }
+
                 if child.is_file().unwrap_or_default() {
                     let file_label = ui.add(Label::new(child.filename()).sense(Sense::click()));
                     // self.add_view_file_menu(&file_label, node);
@@ -67,6 +89,25 @@ impl EnfusionToolsApp {
 
         left_panel.show(ctx, |ui| {
             ui.vertical(|ui| {
+                let response =
+                    TextEdit::singleline(&mut self.internal.file_filter).hint_text("Filter").ui(ui);
+
+                if response.lost_focus()
+                    && response.ctx.input(|input| input.key_pressed(egui::Key::Enter))
+                {
+                    if self.internal.file_filter.is_empty() {
+                        self.internal.filtered_paths = None;
+                    } else if let Some(overlay_fs) = self.internal.overlay_fs.clone() {
+                        if self.internal.file_filter.len() >= 2 {
+                            if let Some(task_queue) = self.internal.task_queue.as_ref() {
+                                let _ = task_queue.send(crate::task::BackgroundTask::FilterPaths(
+                                    overlay_fs,
+                                    self.internal.file_filter.clone(),
+                                ));
+                            }
+                        }
+                    }
+                }
                 if !self.internal.pak_files.is_empty() {
                     let mut open_state_changed = false;
                     let response = ScrollArea::both().show(ui, |ui| {

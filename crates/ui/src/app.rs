@@ -27,10 +27,13 @@ pub(crate) struct Internal {
     pub(crate) pak_files: Vec<VfsPath>,
     pub(crate) async_pak_files: Vec<AsyncVfsPath>,
 
+    pub(crate) filtered_paths: Option<Vec<VfsPath>>,
+
     pub(crate) overlay_fs: Option<VfsPath>,
     pub(crate) async_overlay_fs: Option<AsyncVfsPath>,
 
     pub(crate) opened_file_text: String,
+    pub(crate) file_filter: String,
 }
 
 /// We derive Deserialize/Serialize so we can persist app state on shutdown.
@@ -64,6 +67,8 @@ impl Default for EnfusionToolsApp {
                 overlay_fs: None,
                 async_overlay_fs: None,
                 opened_file_text: "".to_string(),
+                filtered_paths: None,
+                file_filter: "".to_string(),
             },
             opened_file_path: None,
             search_query: "".to_string(),
@@ -150,6 +155,9 @@ impl EnfusionToolsApp {
                 };
 
                 self.internal.opened_file_text = str_data;
+            }
+            BackgroundTaskMessage::FilesFiltered(vfs_paths) => {
+                self.internal.filtered_paths = Some(vfs_paths);
             }
         }
     }
