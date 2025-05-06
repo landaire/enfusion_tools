@@ -323,29 +323,32 @@ pub fn process_background_messages(
                 });
             }
             BackgroundTask::FilterPaths(vfs_path, query) => {
-                let mut matches = Vec::new();
-                let mut queue = vec![vfs_path];
-                let query_has_path = query.contains('/');
-                while let Some(next) = queue.pop() {
-                    let Ok(dir_iter) = next.read_dir() else { continue };
-                    for child in dir_iter {
-                        let haystack = if query_has_path {
-                            child.as_str()
-                        } else {
-                            let path = child.as_str();
-                            let index = path.rfind('/').map(|x| x + 1).unwrap_or(0);
-                            &path[index..]
-                        };
+                let inbox = inbox.clone();
+                execute(async move {
+                    let mut matches = Vec::new();
+                    let mut queue = vec![vfs_path];
+                    let query_has_path = query.contains('/');
+                    while let Some(next) = queue.pop() {
+                        let Ok(dir_iter) = next.read_dir() else { continue };
+                        for child in dir_iter {
+                            let haystack = if query_has_path {
+                                child.as_str()
+                            } else {
+                                let path = child.as_str();
+                                let index = path.rfind('/').map(|x| x + 1).unwrap_or(0);
+                                &path[index..]
+                            };
 
-                        if ascii_icontains(&query, haystack) {
-                            matches.push(child.clone());
+                            if ascii_icontains(&query, haystack) {
+                                matches.push(child.clone());
+                            }
+
+                            queue.push(child);
                         }
-
-                        queue.push(child);
                     }
-                }
 
-                let _ = inbox.send(BackgroundTaskMessage::FilesFiltered(matches));
+                    let _ = inbox.send(BackgroundTaskMessage::FilesFiltered(matches));
+                });
             }
         }
     }
