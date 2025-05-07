@@ -35,25 +35,26 @@ pub(crate) struct LoadedFiles {
 pub enum BackgroundTaskMessage {
     LoadedPakFiles(Result<LoadedFiles, PakError>),
     FileDataLoaded(VfsPath, Vec<u8>),
-    SearchResult(SearchResult),
+    SearchResult(usize, SearchResult),
     FilesFiltered(Vec<VfsPath>),
 }
 
 pub enum BackgroundTask {
     /// Requests the background thread to begin parsing PAK files.
     LoadPakFiles(Vec<FileReference>),
-    PerformSearch(AsyncVfsPath, String),
+    PerformSearch(usize, AsyncVfsPath, String),
     LoadFileData(VfsPath, AsyncVfsPath),
     FilterPaths(Arc<HashMap<(String, String), VfsPath>>, String),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct SearchResult {
     pub file: AsyncVfsPath,
     pub matches: Vec<String>,
 }
 
 pub async fn perform_search(
+    search_id: usize,
     start_path: AsyncVfsPath,
     query: String,
     search_stop: Arc<AtomicBool>,
@@ -112,8 +113,8 @@ pub async fn perform_search(
         let mut linebreak_locations = BTreeMap::new();
         let mut linebreaks_for_match: BTreeMap<usize, BTreeSet<usize>> = BTreeMap::new();
         let mut match_idx = 0usize;
-        for (idx, c) in file_data.chars().enumerate() {
-            if c == '\n' {
+        for (idx, c) in file_data.as_bytes().iter().enumerate() {
+            if *c == b'\n' {
                 linebreak_locations.insert(idx, false);
 
                 // Check if can lock any linebreaks that are AFTER the previous match
@@ -171,6 +172,7 @@ pub async fn perform_search(
                         let last = linebreak_ranges
                             .last()
                             .expect("BUG: linebreak ranges should always have items");
+
                         if *last < m.end { (*first, file_data.len()) } else { (*first, *last) }
                     } else {
                         (0, file_data.len())
@@ -184,10 +186,10 @@ pub async fn perform_search(
             break;
         }
         if results_sender
-            .send(BackgroundTaskMessage::SearchResult(SearchResult {
-                file: next,
-                matches: match_with_context,
-            }))
+            .send(BackgroundTaskMessage::SearchResult(
+                search_id,
+                SearchResult { file: next, matches: match_with_context },
+            ))
             .is_err()
         {
             // The user probably started a new search
@@ -219,7 +221,7 @@ pub fn start_background_thread(
         std::thread::spawn(move || {
             // Force a move into this thread
             let task_queue = task_queue;
-            process_background_messages(inbox, &task_queue);
+            process_background_requests(inbox, &task_queue);
         });
         (sender, None)
     }
@@ -232,7 +234,7 @@ pub fn start_background_thread(
     }
 }
 
-pub fn process_background_messages(
+pub fn process_background_requests(
     inbox: UiInboxSender<BackgroundTaskMessage>,
     task_queue: &Receiver<BackgroundTask>,
 ) {
@@ -325,7 +327,7 @@ pub fn process_background_messages(
                         .expect("failed to send completion");
                 });
             }
-            BackgroundTask::PerformSearch(start_path, query) => {
+            BackgroundTask::PerformSearch(search_id, start_path, query) => {
                 // Notify any pending searches that they should stop
                 search_stop.store(true, std::sync::atomic::Ordering::Relaxed);
                 drop(search_stop);
@@ -338,11 +340,13 @@ pub fn process_background_messages(
                 let thread_stopper = search_stop.clone();
                 #[cfg(not(target_arch = "wasm32"))]
                 execute(async move {
-                    perform_search(start_path, query, thread_stopper, thread_sender).await;
+                    perform_search(search_id, start_path, query, thread_stopper, thread_sender)
+                        .await;
                 });
                 #[cfg(target_arch = "wasm32")]
                 execute(async move {
-                    perform_search(start_path, query, thread_stopper, thread_sender).await;
+                    perform_search(search_id, start_path, query, thread_stopper, thread_sender)
+                        .await;
                 });
             }
             BackgroundTask::LoadFileData(vfs_path, overlay_fs) => {

@@ -43,17 +43,7 @@ impl EnfusionToolsApp {
                     // self.add_view_file_menu(&file_label, node);
                     if file_label.double_clicked() {
                         debug!("file double-clicked");
-                        if let Some(task_queue) = self.internal.task_queue.as_ref() {
-                            debug!("sending task");
-                            // Get the async version of this file
-                            let _ = task_queue.send(crate::task::BackgroundTask::LoadFileData(
-                                child.clone(),
-                                self.internal
-                                    .async_overlay_fs
-                                    .clone()
-                                    .expect("no async overlay FS?"),
-                            ));
-                        }
+                        self.open_file(child.clone());
                     }
                 } else {
                     open_state_changed |= self.build_file_tree_node(child, false, ui);

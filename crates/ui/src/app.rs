@@ -2,9 +2,10 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::mpsc;
 
-use egui_code_editor::CodeEditor;
-use egui_code_editor::ColorTheme;
-use egui_code_editor::Syntax;
+use egui_dock::DockArea;
+use egui_dock::DockState;
+use egui_dock::Style;
+use egui_dock::TabViewer;
 use enfusion_pak::vfs::VfsPath;
 use enfusion_pak::vfs::async_vfs::AsyncVfsPath;
 use log::debug;
@@ -14,10 +15,14 @@ use crate::task::BackgroundTask;
 use crate::task::BackgroundTaskMessage;
 use crate::task::FileReference;
 use crate::task::execute;
-use crate::task::process_background_messages;
+use crate::task::process_background_requests;
 use crate::task::start_background_thread;
+use crate::ui::tab::EditorData;
+use crate::ui::tab::SearchData;
+use crate::ui::tab::TabKind;
+use crate::ui::tab::ToolsTabViewer;
 
-pub(crate) struct Internal {
+pub(crate) struct AppInternalData {
     inbox: egui_inbox::UiInbox<BackgroundTaskMessage>,
 
     pub(crate) task_queue: Option<mpsc::Sender<BackgroundTask>>,
@@ -31,6 +36,8 @@ pub(crate) struct Internal {
 
     pub(crate) opened_file_text: String,
     pub(crate) file_filter: String,
+
+    pub(crate) next_search_query_id: usize,
 }
 
 /// We derive Deserialize/Serialize so we can persist app state on shutdown.
@@ -41,7 +48,10 @@ pub struct EnfusionToolsApp {
     pub(crate) file_paths: Vec<String>,
 
     #[serde(skip)]
-    pub(crate) internal: Internal,
+    pub(crate) internal: AppInternalData,
+
+    #[serde(skip)]
+    pub(crate) dock_state: DockState<TabKind>,
 
     pub(crate) opened_file_path: Option<String>,
 
@@ -55,7 +65,8 @@ impl Default for EnfusionToolsApp {
         Self {
             file_paths: Default::default(),
 
-            internal: Internal {
+            dock_state: DockState::new([].to_vec()),
+            internal: AppInternalData {
                 inbox,
                 task_queue: None,
                 task_queue_rx: None,
@@ -65,6 +76,7 @@ impl Default for EnfusionToolsApp {
                 filtered_paths: None,
                 file_filter: "".to_string(),
                 known_file_paths: Default::default(),
+                next_search_query_id: 0,
             },
             opened_file_path: None,
             search_query: "".to_string(),
@@ -112,7 +124,7 @@ impl EnfusionToolsApp {
         app
     }
 
-    pub fn process_background_message(&mut self, message: BackgroundTaskMessage) {
+    pub fn process_message_From_background(&mut self, message: BackgroundTaskMessage) {
         match message {
             BackgroundTaskMessage::LoadedPakFiles(files) => match files {
                 Ok(mut loaded_files) => {
@@ -134,25 +146,45 @@ impl EnfusionToolsApp {
                     eprintln!("failed to load pak files: {:?}", e);
                 }
             },
-            BackgroundTaskMessage::SearchResult(search_rx) => {
-                self.internal.opened_file_text += search_rx.file.as_str();
-                for m in search_rx.matches {
-                    self.internal.opened_file_text += &m;
-                    self.internal.opened_file_text += "\n...";
+            BackgroundTaskMessage::SearchResult(search_id, search_result) => {
+                for tab in self.dock_state.iter_all_tabs_mut() {
+                    let TabKind::SearchResults(data) = tab.1 else {
+                        continue;
+                    };
+
+                    if data.id == search_id {
+                        data.results.push(search_result);
+                        break;
+                    }
                 }
-                self.internal.opened_file_text += "\n";
             }
-            BackgroundTaskMessage::FileDataLoaded(_, items) => {
+            BackgroundTaskMessage::FileDataLoaded(file, items) => {
                 // Try reading this as text
                 let Ok(str_data) = String::from_utf8(items) else {
                     return;
                 };
 
-                self.internal.opened_file_text = str_data;
+                let surface = self.dock_state.main_surface_mut();
+                surface.push_to_first_leaf(TabKind::Editor(EditorData {
+                    title: file.filename(),
+                    opened_file: file,
+                    contents: str_data,
+                }));
             }
             BackgroundTaskMessage::FilesFiltered(vfs_paths) => {
                 self.internal.filtered_paths = Some(vfs_paths);
             }
+        }
+    }
+
+    pub(crate) fn open_file(&self, file: VfsPath) {
+        if let Some(task_queue) = self.internal.task_queue.as_ref() {
+            debug!("sending task");
+            // Get the async version of this file
+            let _ = task_queue.send(crate::task::BackgroundTask::LoadFileData(
+                file,
+                self.internal.async_overlay_fs.clone().expect("no async overlay FS?"),
+            ));
         }
     }
 }
@@ -169,11 +201,11 @@ impl eframe::App for EnfusionToolsApp {
 
         // Process any background messages
         if let Some(task_queue_rx) = self.internal.task_queue_rx.as_ref() {
-            process_background_messages(self.internal.inbox.sender(), task_queue_rx);
+            process_background_requests(self.internal.inbox.sender(), task_queue_rx);
         }
 
         while let Some(message) = self.internal.inbox.read_without_ctx().next() {
-            self.process_background_message(message);
+            self.process_message_From_background(message);
         }
 
         // Put your widgets into a `SidePanel`, `TopBottomPanel`, `CentralPanel`, `Window` or `Area`.
@@ -240,24 +272,33 @@ impl eframe::App for EnfusionToolsApp {
                             if let Some(vfs_root) = self.internal.async_overlay_fs.clone() {
                                 debug!("Sending search task");
                                 self.internal.opened_file_text.clear();
+                                let search_id = self.internal.next_search_query_id;
+                                self.internal.next_search_query_id += 1;
                                 let _ = task_queue.send(BackgroundTask::PerformSearch(
+                                    search_id,
                                     vfs_root,
                                     self.search_query.clone(),
                                 ));
+
+                                self.dock_state.main_surface_mut().push_to_first_leaf(
+                                    TabKind::SearchResults(SearchData {
+                                        query: self.search_query.clone(),
+                                        id: search_id,
+                                        results: Default::default(),
+                                    }),
+                                );
                             }
                         }
                     }
                 });
-                CodeEditor::default()
-                    .id_source("code editor")
-                    .with_rows(12)
-                    .with_fontsize(14.0)
-                    .with_theme(ColorTheme::GRUVBOX)
-                    .with_syntax(Syntax::rust())
-                    .with_numlines(true)
-                    .vscroll(true)
-                    .auto_shrink(false)
-                    .show(ui, &mut self.internal.opened_file_text);
+
+                DockArea::new(&mut self.dock_state)
+                    .style(Style::from_egui(ui.style().as_ref()))
+                    .allowed_splits(egui_dock::AllowedSplits::All)
+                    .show_leaf_collapse_buttons(false)
+                    .show_leaf_close_all_buttons(false)
+                    .show_close_buttons(true)
+                    .show_inside(ui, &mut ToolsTabViewer { app_internal_data: &mut self.internal });
             });
 
             // ui.add_sized(ui.available_size(), widget)
