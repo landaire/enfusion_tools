@@ -37,6 +37,7 @@ pub enum BackgroundTaskMessage {
     FileDataLoaded(VfsPath, Vec<u8>),
     SearchResult(usize, SearchResult),
     FilesFiltered(Vec<VfsPath>),
+    RequestOpenFile(VfsPath),
 }
 
 pub enum BackgroundTask {
@@ -50,7 +51,7 @@ pub enum BackgroundTask {
 #[derive(Debug, Clone)]
 pub struct SearchResult {
     pub file: AsyncVfsPath,
-    pub matches: Vec<String>,
+    pub matches: Vec<(usize, String)>,
 }
 
 pub async fn perform_search(
@@ -110,18 +111,25 @@ pub async fn perform_search(
             continue;
         }
 
-        let mut linebreak_locations = BTreeMap::new();
+        let mut linebreak_locations: BTreeMap<usize, (usize, bool)> = BTreeMap::new();
         let mut linebreaks_for_match: BTreeMap<usize, BTreeSet<usize>> = BTreeMap::new();
         let mut match_idx = 0usize;
         for (idx, c) in file_data.as_bytes().iter().enumerate() {
             if *c == b'\n' {
-                linebreak_locations.insert(idx, false);
+                let line_num = if linebreak_locations.is_empty() {
+                    1usize
+                } else {
+                    linebreak_locations.last_entry().unwrap().get().0
+                };
+                linebreak_locations.insert(idx, (line_num + 1, false));
 
                 // Check if can lock any linebreaks that are AFTER the previous match
                 let prev_match_idx = match_idx.saturating_sub(1);
                 let last_start = match_locations[prev_match_idx].start;
                 if idx > last_start {
-                    for (idx, locked) in linebreak_locations.range_mut(last_start..=idx).take(2) {
+                    for (idx, (_line_num, locked)) in
+                        linebreak_locations.range_mut(last_start..=idx).take(2)
+                    {
                         *locked = true;
                         linebreaks_for_match.entry(prev_match_idx).or_default().insert(*idx);
                     }
@@ -140,14 +148,16 @@ pub async fn perform_search(
                     // want to prune the tree of non-locked linebreaks
 
                     // Lock in the two positions closest to this
-                    for (idx, locked) in linebreak_locations.range_mut(..idx).rev().take(2) {
+                    for (idx, (_line_num, locked)) in
+                        linebreak_locations.range_mut(..idx).rev().take(2)
+                    {
                         *locked = true;
                         linebreaks_for_match.entry(match_idx).or_default().insert(*idx);
                     }
 
-                    linebreak_locations.retain(|_k, v| {
+                    linebreak_locations.retain(|_k, (_line_num, locked)| {
                         // Keep any locked linebreaks and discard all others
-                        *v
+                        *locked
                     });
 
                     // We will go 1-past the number of matches so that we can get
@@ -178,7 +188,14 @@ pub async fn perform_search(
                         (0, file_data.len())
                     };
 
-                file_data[context_start..context_end].to_owned()
+                // Grab the line number for the first match
+                let context_line_start = if context_start == 0 {
+                    1
+                } else {
+                    linebreak_locations.get(&context_start).unwrap().0
+                };
+
+                (context_line_start, file_data[context_start..context_end].to_owned())
             })
             .collect();
 

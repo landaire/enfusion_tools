@@ -23,7 +23,7 @@ use crate::ui::tab::TabKind;
 use crate::ui::tab::ToolsTabViewer;
 
 pub(crate) struct AppInternalData {
-    inbox: egui_inbox::UiInbox<BackgroundTaskMessage>,
+    pub(crate) inbox: egui_inbox::UiInbox<BackgroundTaskMessage>,
 
     pub(crate) task_queue: Option<mpsc::Sender<BackgroundTask>>,
     task_queue_rx: Option<mpsc::Receiver<BackgroundTask>>,
@@ -175,6 +175,9 @@ impl EnfusionToolsApp {
             BackgroundTaskMessage::FilesFiltered(vfs_paths) => {
                 self.internal.filtered_paths = Some(vfs_paths);
             }
+            BackgroundTaskMessage::RequestOpenFile(vfs_path) => {
+                self.open_file(vfs_path);
+            }
         }
     }
 
@@ -271,7 +274,7 @@ impl eframe::App for EnfusionToolsApp {
                         debug!("Search requested");
                         if let Some(task_queue) = &self.internal.task_queue {
                             if let Some(vfs_root) = self.internal.async_overlay_fs.clone() {
-                                debug!("Sending search task");
+                                debug!("Sending earch task");
                                 self.internal.opened_file_text.clear();
                                 let search_id = self.internal.next_search_query_id;
                                 self.internal.next_search_query_id += 1;
@@ -281,8 +284,10 @@ impl eframe::App for EnfusionToolsApp {
                                     self.search_query.clone(),
                                 ));
 
+                                let query = self.search_query.clone();
                                 self.dock_state.main_surface_mut().push_to_first_leaf(
                                     TabKind::SearchResults(SearchData {
+                                        tab_title: format!("{} - Search Results", query),
                                         query: self.search_query.clone(),
                                         id: search_id,
                                         results: Default::default(),
