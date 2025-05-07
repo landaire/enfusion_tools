@@ -1,15 +1,14 @@
+use std::collections::HashMap;
+use std::sync::Arc;
 use std::sync::mpsc;
 
 use egui_code_editor::CodeEditor;
 use egui_code_editor::ColorTheme;
 use egui_code_editor::Syntax;
-use enfusion_pak::vfs::MemoryFS;
-use enfusion_pak::vfs::OverlayFS;
 use enfusion_pak::vfs::VfsPath;
-use enfusion_pak::vfs::async_vfs::AsyncMemoryFS;
-use enfusion_pak::vfs::async_vfs::AsyncOverlayFS;
 use enfusion_pak::vfs::async_vfs::AsyncVfsPath;
 use log::debug;
+use std::path::PathBuf;
 
 use crate::task::BackgroundTask;
 use crate::task::BackgroundTaskMessage;
@@ -24,13 +23,11 @@ pub(crate) struct Internal {
     pub(crate) task_queue: Option<mpsc::Sender<BackgroundTask>>,
     task_queue_rx: Option<mpsc::Receiver<BackgroundTask>>,
 
-    pub(crate) pak_files: Vec<VfsPath>,
-    pub(crate) async_pak_files: Vec<AsyncVfsPath>,
-
     pub(crate) filtered_paths: Option<Vec<VfsPath>>,
 
     pub(crate) overlay_fs: Option<VfsPath>,
     pub(crate) async_overlay_fs: Option<AsyncVfsPath>,
+    pub(crate) known_file_paths: Arc<HashMap<(String, String), VfsPath>>,
 
     pub(crate) opened_file_text: String,
     pub(crate) file_filter: String,
@@ -40,7 +37,8 @@ pub(crate) struct Internal {
 #[derive(serde::Deserialize, serde::Serialize)]
 #[serde(default)] // if we add new fields, give them default values when deserializing old state
 pub struct EnfusionToolsApp {
-    pub(crate) data_path: String,
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) file_paths: Vec<String>,
 
     #[serde(skip)]
     pub(crate) internal: Internal,
@@ -52,23 +50,21 @@ pub struct EnfusionToolsApp {
 
 impl Default for EnfusionToolsApp {
     fn default() -> Self {
-        let data_dir = r#"D:\SteamLibrary\steamapps\common\Arma Reforger\addons\data"#.to_string();
         let inbox = egui_inbox::UiInbox::new();
 
         Self {
-            data_path: data_dir,
+            file_paths: Default::default(),
 
             internal: Internal {
                 inbox,
                 task_queue: None,
                 task_queue_rx: None,
-                pak_files: Vec::new(),
-                async_pak_files: Vec::new(),
                 overlay_fs: None,
                 async_overlay_fs: None,
                 opened_file_text: "".to_string(),
                 filtered_paths: None,
                 file_filter: "".to_string(),
+                known_file_paths: Default::default(),
             },
             opened_file_path: None,
             search_query: "".to_string(),
@@ -95,18 +91,19 @@ impl EnfusionToolsApp {
 
         #[cfg(not(target_arch = "wasm32"))]
         {
-            let mut pak_files = Vec::new();
-            for entry in std::fs::read_dir(&app.data_path).expect("failed to read dir") {
-                let entry = entry.expect("could not get entry");
-                let path = entry.path();
-                if let Some("pak") = path.extension().and_then(std::ffi::OsStr::to_str) {
-                    pak_files.push(FileReference(path));
+            if !app.file_paths.is_empty() {
+                let mut pak_file_paths = Vec::new();
+                for file in &app.file_paths {
+                    let path = PathBuf::from(file);
+                    if path.exists() {
+                        pak_file_paths.push(FileReference(path));
+                    }
                 }
-            }
 
-            task_queue
-                .send(BackgroundTask::LoadPakFiles(pak_files))
-                .expect("failed to send background task");
+                task_queue
+                    .send(BackgroundTask::LoadPakFiles(pak_file_paths))
+                    .expect("failed to send background task");
+            }
         }
 
         app.internal.task_queue = Some(task_queue);
@@ -118,23 +115,20 @@ impl EnfusionToolsApp {
     pub fn process_background_message(&mut self, message: BackgroundTaskMessage) {
         match message {
             BackgroundTaskMessage::LoadedPakFiles(files) => match files {
-                Ok(files) => {
-                    self.internal.pak_files.clear();
-                    self.internal.pak_files.push(VfsPath::new(MemoryFS::new()));
-
-                    self.internal.async_pak_files.clear();
-                    self.internal.async_pak_files.push(AsyncVfsPath::new(AsyncMemoryFS::new()));
-
-                    for file in files {
-                        self.internal.pak_files.push(VfsPath::new(file.clone()));
-                        self.internal.async_pak_files.push(AsyncVfsPath::new(file.clone()));
+                Ok(mut loaded_files) => {
+                    #[cfg(not(target_arch = "wasm32"))]
+                    {
+                        self.file_paths = loaded_files
+                            .disk_files_parsed
+                            .drain(..)
+                            .filter_map(|handle| handle.0.to_str().map(|s| s.to_string()))
+                            .collect();
                     }
 
-                    self.internal.overlay_fs =
-                        Some(VfsPath::new(OverlayFS::new(self.internal.pak_files.as_slice())));
-                    self.internal.async_overlay_fs = Some(AsyncVfsPath::new(AsyncOverlayFS::new(
-                        self.internal.async_pak_files.as_slice(),
-                    )));
+                    self.internal.known_file_paths = Arc::new(loaded_files.known_paths);
+
+                    self.internal.overlay_fs = Some(loaded_files.overlay_fs);
+                    self.internal.async_overlay_fs = Some(loaded_files.async_overlay_fs);
                 }
                 Err(e) => {
                     eprintln!("failed to load pak files: {:?}", e);

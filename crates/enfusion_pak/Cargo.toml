@@ -19,7 +19,6 @@ winnow = "0.7.7"
 color-eyre = { version = "0.6", optional = true }
 humansize = { version = "2.0.0", optional = true }
 vfs = "0.12.1"
-ouroboros = "0.18.5"
 flate2 = "1.1.1"
 wasm-bindgen-futures = "0.4.50"
 log = "0.4.27"
@@ -28,5 +27,6 @@ async-std = "1.13.1"
 
 [features]
 default = []
+arc = []
 async_vfs = ["vfs/async-vfs"]
 bin = ["dep:clap", "dep:color-eyre", "dep:memmap2", "dep:humansize"]

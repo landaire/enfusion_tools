@@ -99,7 +99,9 @@ fn parse_pak_files<P: AsRef<Path>>(files: &[P], args: &Args) -> color_eyre::Resu
                 continue;
             };
 
-            merged_fs.merge(other_fs.clone());
+            RcFileEntry::get_mut(merged_fs)
+                .expect("could not get merged_fs as mut")
+                .merge_ref(RcFileEntry::clone(other_fs));
         }
 
         print_pak_file_chunk_details(merged_fs, args);

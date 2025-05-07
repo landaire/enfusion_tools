@@ -1,3 +1,5 @@
+use async_std::path::PathBuf;
+use std::collections::HashMap;
 use std::fmt::Debug;
 use std::io::Cursor;
 use std::ops::Range;
@@ -6,9 +8,10 @@ use vfs::VfsError;
 use vfs::VfsMetadata;
 use vfs::error::VfsErrorKind;
 
-use crate::FileEntry;
+use crate::Chunk;
 use crate::FileEntryMeta;
 use crate::PakFile;
+use crate::RcFileEntry;
 
 pub trait Prime {
     fn prime_file(&self, file_range: Range<usize>) -> impl AsRef<[u8]>;
@@ -17,11 +20,42 @@ pub trait Prime {
 #[derive(Debug, Clone)]
 pub struct PakVfs<T> {
     pub(crate) source: T,
+
+    entry_cache: HashMap<String, RcFileEntry>,
 }
 
-impl<T> PakVfs<T> {
+impl<T> PakVfs<T>
+where
+    T: std::ops::Deref,
+    T::Target: AsRef<PakFile>,
+{
     pub fn new(source: T) -> Self {
-        Self { source }
+        // Generate the cache
+        let mut entry_cache = HashMap::new();
+        let pak: &PakFile = source.as_ref();
+        let file_chunk = pak.file_chunk().unwrap();
+        let Chunk::File { fs } = file_chunk else { panic!("file chunk is not a file?") };
+
+        let mut queue = vec![(PathBuf::from("/"), RcFileEntry::clone(fs))];
+        while let Some((path, current)) = queue.pop() {
+            let this_path = path.join(current.name());
+            // if !RcFileEntry::ptr_eq(&current, fs) {
+            let key = this_path.to_str().expect("could not convert path to str").to_string();
+            entry_cache.insert(key, RcFileEntry::clone(&current));
+            // }
+
+            match current.meta() {
+                FileEntryMeta::Folder { children } => {
+                    for child in children {
+                        queue.push((this_path.clone(), RcFileEntry::clone(child)));
+                    }
+                }
+                FileEntryMeta::File { .. } => {
+                    // files don't need any action
+                }
+            }
+        }
+        Self { source, entry_cache }
     }
 }
 
@@ -30,38 +64,38 @@ where
     T: std::ops::Deref,
     T::Target: AsRef<PakFile>,
 {
-    pub fn entry_at(&self, path: &str) -> vfs::VfsResult<&FileEntry> {
-        let pak: &PakFile = self.source.as_ref();
-        let Some(crate::Chunk::File { fs }) = pak.file_chunk() else {
-            panic!("failed to find file chunk")
-        };
+    pub fn entry_at(&self, path: &str) -> vfs::VfsResult<&RcFileEntry> {
+        let lookup_key = if path.is_empty() { "/" } else { path };
 
-        let mut current: &FileEntry = fs;
+        self.entry_cache.get(lookup_key).ok_or_else(|| VfsError::from(VfsErrorKind::FileNotFound))
+        // self.entry_cache.get()
 
-        let path_parts = if path.starts_with("/") {
-            path.split('/').skip(1)
-        } else {
-            #[allow(clippy::iter_skip_zero)]
-            path.split('/').skip(0)
-        };
+        // let mut current: &FileEntry = fs;
 
-        for part in path_parts {
-            if part.is_empty() {
-                continue;
-            }
+        // let path_parts = if path.starts_with("/") {
+        //     path.split('/').skip(1)
+        // } else {
+        //     #[allow(clippy::iter_skip_zero)]
+        //     path.split('/').skip(0)
+        // };
 
-            let FileEntryMeta::Folder { children } = current.meta() else {
-                return Err(VfsError::from(VfsErrorKind::NotSupported));
-            };
+        // for part in path_parts {
+        //     if part.is_empty() {
+        //         continue;
+        //     }
 
-            if let Some(next) = children.iter().find(|child| child.name() == part) {
-                current = next;
-            } else {
-                return Err(VfsError::from(VfsErrorKind::FileNotFound));
-            }
-        }
+        //     let FileEntryMeta::Folder { children } = current.meta() else {
+        //         return Err(VfsError::from(VfsErrorKind::NotSupported));
+        //     };
 
-        Ok(current)
+        //     if let Some(next) = children.iter().find(|child| child.name() == part) {
+        //         current = next;
+        //     } else {
+        //         return Err(VfsError::from(VfsErrorKind::FileNotFound));
+        //     }
+        // }
+
+        // Ok(current)
     }
 }
 

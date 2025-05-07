@@ -26,6 +26,12 @@ pub struct FileEntry {
     meta: FileEntryMeta,
 }
 
+#[cfg(feature = "arc")]
+pub type RcFileEntry = std::sync::Arc<FileEntry>;
+
+#[cfg(not(feature = "arc"))]
+pub type RcFileEntry = std::rc::Rc<FileEntry>;
+
 impl FileEntry {
     pub fn name(&self) -> &str {
         self.name.as_str()
@@ -39,6 +45,7 @@ impl FileEntry {
         &self.meta
     }
 
+    /// Merges `other` into this node.
     pub fn merge(&mut self, other: Self) {
         let FileEntryMeta::Folder { children: self_children } = &mut self.meta else {
             panic!("merge should only be called on directories");
@@ -61,9 +68,43 @@ impl FileEntry {
                     FileEntryKind::File,
                     "File was duplicated across PAK files"
                 );
-                self_child.merge(other_child);
+                RcFileEntry::get_mut(self_child)
+                    .expect("couldn't get self_child as mut")
+                    .merge(RcFileEntry::try_unwrap(other_child).expect("couldn't unwrap child"));
             } else {
                 self_children.push(other_child);
+            }
+        }
+    }
+
+    /// Merges refcounted children from `other` into this node.
+    pub fn merge_ref(&mut self, other: RcFileEntry) {
+        let FileEntryMeta::Folder { children: self_children } = &mut self.meta else {
+            panic!("merge should only be called on directories");
+        };
+
+        let FileEntryMeta::Folder { children: other_children } = &other.meta else {
+            panic!("merge should only be called on directories");
+        };
+
+        for other_child in other_children {
+            if let Some(self_child) =
+                self_children.iter_mut().find(|self_child| self_child.name == other_child.name)
+            {
+                if other_child.kind() == FileEntryKind::File {
+                    debug!("{:#?}, {:#?}", &self_child, &other_child);
+                }
+                assert_eq!(other_child.kind(), self_child.kind());
+                assert_ne!(
+                    other_child.kind(),
+                    FileEntryKind::File,
+                    "File was duplicated across PAK files"
+                );
+                RcFileEntry::get_mut(self_child)
+                    .expect("couldn't get self_child as mut")
+                    .merge_ref(RcFileEntry::clone(other_child));
+            } else {
+                self_children.push(RcFileEntry::clone(other_child));
             }
         }
     }
@@ -73,7 +114,7 @@ impl FileEntry {
 #[kinded(kind = FileEntryKind)]
 pub enum FileEntryMeta {
     Folder {
-        children: Vec<FileEntry>,
+        children: Vec<RcFileEntry>,
     },
     File {
         offset: u32,
@@ -91,7 +132,7 @@ impl FileEntryMeta {
     /// Adds a child to this file entry. No-op if this is a folder
     pub fn push_child(&mut self, child: FileEntry) {
         if let FileEntryMeta::Folder { children } = self {
-            children.push(child);
+            children.push(RcFileEntry::new(child));
         }
     }
 
@@ -170,7 +211,7 @@ pub enum Chunk {
     Form { file_size: u32, pak_file_type: PakType },
     Head { version: u32, unknown_data: Range<usize> },
     Data { data: Range<usize> },
-    File { fs: FileEntry },
+    File { fs: RcFileEntry },
     Unknown(u32),
 }
 
@@ -253,7 +294,9 @@ impl PakParser {
                 } => {
                     if bytes_processed + bytes_consumed == chunk_len {
                         assert_eq!(parents.len(), 1);
-                        self.chunks.push(Chunk::File { fs: parents.pop().unwrap().entry });
+                        self.chunks.push(Chunk::File {
+                            fs: RcFileEntry::new(parents.pop().unwrap().entry),
+                        });
                         PakParserState::Done
                     } else {
                         PakParserState::ParsingFileChunk {

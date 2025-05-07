@@ -32,6 +32,7 @@ rfd = { version = "0.15.3", features = ["file-handle-inner"] }
 egui_inbox = "0.8.0"
 enfusion_pak = { version = "*", path = "../enfusion_pak", features = [
     "async_vfs",
+    "arc",
 ] }
 itertools = "0.14.0"
 egui_code_editor = "0.2.13"
@@ -39,6 +40,9 @@ regex = "1.11.1"
 futures = "0.3.31"
 async-std = "1.13.1"
 async-trait = "0.1.88"
+egui_graphs = "0.25.0"
+petgraph = "0.8.1"
+egui_dock = "0.16.0"
 
 # native:
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]

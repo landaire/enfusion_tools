@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use egui::CollapsingHeader;
 use egui::Label;
 use egui::ScrollArea;
@@ -97,18 +99,16 @@ impl EnfusionToolsApp {
                 {
                     if self.internal.file_filter.is_empty() {
                         self.internal.filtered_paths = None;
-                    } else if let Some(overlay_fs) = self.internal.overlay_fs.clone() {
-                        if self.internal.file_filter.len() >= 2 {
-                            if let Some(task_queue) = self.internal.task_queue.as_ref() {
-                                let _ = task_queue.send(crate::task::BackgroundTask::FilterPaths(
-                                    overlay_fs,
-                                    self.internal.file_filter.clone(),
-                                ));
-                            }
+                    } else if self.internal.file_filter.len() >= 2 {
+                        if let Some(task_queue) = self.internal.task_queue.as_ref() {
+                            let _ = task_queue.send(crate::task::BackgroundTask::FilterPaths(
+                                Arc::clone(&self.internal.known_file_paths),
+                                self.internal.file_filter.clone(),
+                            ));
                         }
                     }
                 }
-                if !self.internal.pak_files.is_empty() {
+                if self.internal.overlay_fs.is_some() {
                     let mut open_state_changed = false;
                     let response = ScrollArea::both().show(ui, |ui| {
                         if let Some(overlay_fs) = self.internal.overlay_fs.clone() {

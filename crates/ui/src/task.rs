@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use std::collections::HashMap;
 use std::collections::VecDeque;
 use std::ops::Range;
 use std::sync::Arc;
@@ -11,17 +12,28 @@ use std::sync::mpsc::Receiver;
 use egui_inbox::UiInboxSender;
 use enfusion_pak::error::PakError;
 use enfusion_pak::pak_vfs::PakVfs;
+use enfusion_pak::vfs::MemoryFS;
+use enfusion_pak::vfs::OverlayFS;
 use enfusion_pak::vfs::VfsPath;
+use enfusion_pak::vfs::async_vfs::AsyncMemoryFS;
+use enfusion_pak::vfs::async_vfs::AsyncOverlayFS;
 use enfusion_pak::vfs::async_vfs::AsyncVfsPath;
 use futures::StreamExt;
 use log::debug;
 
-use crate::pak_wrapper::WrappedPakFile;
 use crate::pak_wrapper::parse_pak_file;
 
 #[derive(Debug)]
+pub(crate) struct LoadedFiles {
+    pub disk_files_parsed: Vec<FileReference>,
+    pub overlay_fs: VfsPath,
+    pub async_overlay_fs: AsyncVfsPath,
+    pub known_paths: HashMap<(String, String), VfsPath>,
+}
+
+#[derive(Debug)]
 pub enum BackgroundTaskMessage {
-    LoadedPakFiles(Result<Vec<PakVfs<Arc<WrappedPakFile>>>, PakError>),
+    LoadedPakFiles(Result<LoadedFiles, PakError>),
     FileDataLoaded(VfsPath, Vec<u8>),
     SearchResult(SearchResult),
     FilesFiltered(Vec<VfsPath>),
@@ -32,7 +44,7 @@ pub enum BackgroundTask {
     LoadPakFiles(Vec<FileReference>),
     PerformSearch(AsyncVfsPath, String),
     LoadFileData(VfsPath, AsyncVfsPath),
-    FilterPaths(VfsPath, String),
+    FilterPaths(Arc<HashMap<(String, String), VfsPath>>, String),
 }
 
 #[derive(Debug)]
@@ -236,14 +248,23 @@ pub fn process_background_messages(
             BackgroundTask::LoadPakFiles(handles) => {
                 let inbox = inbox.clone();
                 execute(async move {
-                    let mut parsed_files = Vec::with_capacity(handles.len());
+                    let mut parsed_paths = Vec::with_capacity(handles.len() + 1);
+                    parsed_paths.push(VfsPath::new(MemoryFS::new()));
+
+                    let mut parsed_async_paths = Vec::with_capacity(handles.len() + 1);
+                    parsed_async_paths.push(AsyncVfsPath::new(AsyncMemoryFS::new()));
+
+                    let mut parsed_handles = Vec::with_capacity(handles.len());
                     for handle in handles {
                         #[cfg(target_arch = "wasm32")]
                         {
-                            match Ok(parse_pak_file(handle).await) {
+                            let cloned = handle.clone();
+                            match Ok(parse_pak_file(cloned).await) {
                                 Ok(parsed_file) => {
                                     let vfs = PakVfs::new(Arc::new(parsed_file));
-                                    parsed_files.push(vfs);
+                                    parsed_paths.push(VfsPath::new(vfs.clone()));
+                                    parsed_async_paths.push(AsyncVfsPath::new(vfs));
+                                    parsed_handles.push(handle);
                                 }
                                 Err(e) => {
                                     inbox
@@ -254,10 +275,13 @@ pub fn process_background_messages(
                         }
                         #[cfg(not(target_arch = "wasm32"))]
                         {
-                            match parse_pak_file(handle.0) {
+                            let cloned = handle.clone();
+                            match parse_pak_file(cloned.0) {
                                 Ok(parsed_file) => {
                                     let vfs = PakVfs::new(Arc::new(parsed_file));
-                                    parsed_files.push(vfs);
+                                    parsed_paths.push(VfsPath::new(vfs.clone()));
+                                    parsed_async_paths.push(AsyncVfsPath::new(vfs));
+                                    parsed_handles.push(handle);
                                 }
                                 Err(e) => {
                                     inbox
@@ -268,8 +292,36 @@ pub fn process_background_messages(
                         }
                     }
 
+                    let overlay_fs = VfsPath::new(OverlayFS::new(&parsed_paths));
+                    let async_overlay_fs =
+                        AsyncVfsPath::new(AsyncOverlayFS::new(&parsed_async_paths));
+
+                    let mut known_paths = HashMap::new();
+                    let mut queue = vec![overlay_fs.clone()];
+
+                    while let Some(next) = queue.pop() {
+                        if next != overlay_fs {
+                            let full_path = next.as_str().to_string();
+                            let name = next.filename();
+
+                            known_paths.insert((full_path, name), next.clone());
+                        }
+
+                        let Ok(reader) = next.read_dir() else {
+                            continue;
+                        };
+                        for child in reader {
+                            queue.push(child);
+                        }
+                    }
+
                     inbox
-                        .send(BackgroundTaskMessage::LoadedPakFiles(Ok(parsed_files)))
+                        .send(BackgroundTaskMessage::LoadedPakFiles(Ok(LoadedFiles {
+                            disk_files_parsed: parsed_handles,
+                            overlay_fs,
+                            async_overlay_fs,
+                            known_paths,
+                        })))
                         .expect("failed to send completion");
                 });
             }
@@ -321,28 +373,17 @@ pub fn process_background_messages(
                     }
                 });
             }
-            BackgroundTask::FilterPaths(vfs_path, query) => {
+            BackgroundTask::FilterPaths(known_paths, query) => {
                 let inbox = inbox.clone();
                 execute(async move {
                     let mut matches = Vec::new();
-                    let mut queue = vec![vfs_path];
+
                     let query_has_path = query.contains('/');
-                    while let Some(next) = queue.pop() {
-                        let Ok(dir_iter) = next.read_dir() else { continue };
-                        for child in dir_iter {
-                            let haystack = if query_has_path {
-                                child.as_str()
-                            } else {
-                                let path = child.as_str();
-                                let index = path.rfind('/').map(|x| x + 1).unwrap_or(0);
-                                &path[index..]
-                            };
+                    for ((full_path, name), vfs_path) in known_paths.iter() {
+                        let haystack = if query_has_path { full_path } else { name };
 
-                            if ascii_icontains(&query, haystack) {
-                                matches.push(child.clone());
-                            }
-
-                            queue.push(child);
+                        if ascii_icontains(&query, haystack) {
+                            matches.push(vfs_path.clone());
                         }
                     }
 
