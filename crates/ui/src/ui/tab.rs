@@ -6,6 +6,8 @@ use egui_code_editor::Syntax;
 use enfusion_pak::vfs::VfsPath;
 
 use crate::app::AppInternalData;
+use crate::task::LineNumber;
+use crate::task::SearchId;
 use crate::task::SearchResult;
 
 #[derive(Clone)]
@@ -26,7 +28,7 @@ pub struct EditorData {
 pub struct SearchData {
     pub query: String,
     pub tab_title: String,
-    pub id: usize,
+    pub id: SearchId,
     pub results: Vec<SearchResult>,
 }
 
@@ -81,16 +83,18 @@ impl ToolsTabViewer<'_> {
                     }
                 })
                 .body(|ui| {
-                    for (num, (line_num, file_match)) in file_result.matches.iter().enumerate() {
+                    for (num, (LineNumber(line_num), file_match)) in
+                        file_result.matches.iter().enumerate()
+                    {
                         CodeEditor::default()
-                            .id_source(format!("search_{}_result_{}", search_data.id, num))
+                            .id_source(format!("search_{}_result_{}", search_data.id.0, num))
                             .with_rows(file_match.lines().count())
                             .with_fontsize(14.0)
                             .with_theme(ColorTheme::GRUVBOX)
                             .with_syntax(Syntax::rust())
                             .with_numlines(true)
                             .with_numlines_shift(
-                                (*line_num - 1).try_into().expect("invalid line num shift"),
+                                (line_num - 1).try_into().expect("invalid line num shift"),
                             )
                             .vscroll(false)
                             .auto_shrink(false)

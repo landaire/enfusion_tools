@@ -13,7 +13,10 @@ use std::path::PathBuf;
 
 use crate::task::BackgroundTask;
 use crate::task::BackgroundTaskMessage;
+use crate::task::FileName;
 use crate::task::FileReference;
+use crate::task::FullPath;
+use crate::task::SearchId;
 use crate::task::execute;
 use crate::task::process_background_requests;
 use crate::task::start_background_thread;
@@ -32,12 +35,12 @@ pub(crate) struct AppInternalData {
 
     pub(crate) overlay_fs: Option<VfsPath>,
     pub(crate) async_overlay_fs: Option<AsyncVfsPath>,
-    pub(crate) known_file_paths: Arc<HashMap<(String, String), VfsPath>>,
+    pub(crate) known_file_paths: Arc<HashMap<(FullPath, FileName), VfsPath>>,
 
     pub(crate) opened_file_text: String,
     pub(crate) file_filter: String,
 
-    pub(crate) next_search_query_id: usize,
+    pub(crate) next_search_query_id: SearchId,
 }
 
 /// We derive Deserialize/Serialize so we can persist app state on shutdown.
@@ -77,7 +80,7 @@ impl Default for EnfusionToolsApp {
                 filtered_paths: None,
                 file_filter: "".to_string(),
                 known_file_paths: Default::default(),
-                next_search_query_id: 0,
+                next_search_query_id: SearchId(0),
             },
             opened_file_path: None,
             search_query: "".to_string(),
@@ -125,7 +128,7 @@ impl EnfusionToolsApp {
         app
     }
 
-    pub fn process_message_From_background(&mut self, message: BackgroundTaskMessage) {
+    pub fn process_message_from_background(&mut self, message: BackgroundTaskMessage) {
         match message {
             BackgroundTaskMessage::LoadedPakFiles(files) => match files {
                 Ok(mut loaded_files) => {
@@ -209,7 +212,7 @@ impl eframe::App for EnfusionToolsApp {
         }
 
         while let Some(message) = self.internal.inbox.read_without_ctx().next() {
-            self.process_message_From_background(message);
+            self.process_message_from_background(message);
         }
 
         // Put your widgets into a `SidePanel`, `TopBottomPanel`, `CentralPanel`, `Window` or `Area`.
@@ -277,7 +280,8 @@ impl eframe::App for EnfusionToolsApp {
                                 debug!("Sending earch task");
                                 self.internal.opened_file_text.clear();
                                 let search_id = self.internal.next_search_query_id;
-                                self.internal.next_search_query_id += 1;
+                                self.internal.next_search_query_id.0 += 1;
+
                                 let _ = task_queue.send(BackgroundTask::PerformSearch(
                                     search_id,
                                     vfs_root,

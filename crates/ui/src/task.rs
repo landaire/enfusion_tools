@@ -24,38 +24,53 @@ use log::debug;
 use crate::pak_wrapper::parse_pak_file;
 
 #[derive(Debug)]
-pub(crate) struct LoadedFiles {
+pub struct LoadedFiles {
     pub disk_files_parsed: Vec<FileReference>,
     pub overlay_fs: VfsPath,
     pub async_overlay_fs: AsyncVfsPath,
-    pub known_paths: HashMap<(String, String), VfsPath>,
+    pub known_paths: HashMap<(FullPath, FileName), VfsPath>,
 }
+
+#[repr(transparent)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct SearchId(pub usize);
+
+#[repr(transparent)]
+#[derive(Debug, Copy, Clone)]
+pub struct LineNumber(pub usize);
 
 #[derive(Debug)]
 pub enum BackgroundTaskMessage {
     LoadedPakFiles(Result<LoadedFiles, PakError>),
     FileDataLoaded(VfsPath, Vec<u8>),
-    SearchResult(usize, SearchResult),
+    SearchResult(SearchId, SearchResult),
     FilesFiltered(Vec<VfsPath>),
     RequestOpenFile(VfsPath),
 }
 
+#[repr(transparent)]
+#[derive(PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+pub struct FullPath(String);
+
+#[repr(transparent)]
+#[derive(PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+pub struct FileName(String);
 pub enum BackgroundTask {
     /// Requests the background thread to begin parsing PAK files.
     LoadPakFiles(Vec<FileReference>),
-    PerformSearch(usize, AsyncVfsPath, String),
+    PerformSearch(SearchId, AsyncVfsPath, String),
     LoadFileData(VfsPath, AsyncVfsPath),
-    FilterPaths(Arc<HashMap<(String, String), VfsPath>>, String),
+    FilterPaths(Arc<HashMap<(FullPath, FileName), VfsPath>>, String),
 }
 
 #[derive(Debug, Clone)]
 pub struct SearchResult {
     pub file: AsyncVfsPath,
-    pub matches: Vec<(usize, String)>,
+    pub matches: Vec<(LineNumber, String)>,
 }
 
 pub async fn perform_search(
-    search_id: usize,
+    search_id: SearchId,
     start_path: AsyncVfsPath,
     query: String,
     search_stop: Arc<AtomicBool>,
@@ -195,7 +210,7 @@ pub async fn perform_search(
                     linebreak_locations.get(&context_start).unwrap().0
                 };
 
-                (context_line_start, file_data[context_start..context_end].to_owned())
+                (LineNumber(context_line_start), file_data[context_start..context_end].to_owned())
             })
             .collect();
 
@@ -323,7 +338,7 @@ pub fn process_background_requests(
                             let full_path = next.as_str().to_string();
                             let name = next.filename();
 
-                            known_paths.insert((full_path, name), next.clone());
+                            known_paths.insert((FullPath(full_path), FileName(name)), next.clone());
                         }
 
                         let Ok(reader) = next.read_dir() else {
@@ -400,7 +415,7 @@ pub fn process_background_requests(
                     let mut matches = Vec::new();
 
                     let query_has_path = query.contains('/');
-                    for ((full_path, name), vfs_path) in known_paths.iter() {
+                    for ((FullPath(full_path), FileName(name)), vfs_path) in known_paths.iter() {
                         let haystack = if query_has_path { full_path } else { name };
 
                         if ascii_icontains(&query, haystack) {
