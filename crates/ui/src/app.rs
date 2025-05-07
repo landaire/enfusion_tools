@@ -63,6 +63,7 @@ impl Default for EnfusionToolsApp {
         let inbox = egui_inbox::UiInbox::new();
 
         Self {
+            #[cfg(not(target_arch = "wasm32"))]
             file_paths: Default::default(),
 
             dock_state: DockState::new([].to_vec()),

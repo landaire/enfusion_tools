@@ -1304,18 +1304,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "egui_graphs"
-version = "0.25.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "69a8127b19695dfe185800c2ad801e265453dcfb1e490b4b810b7cf5148aceb7"
-dependencies = [
- "egui",
- "petgraph 0.7.1",
- "rand 0.9.1",
- "serde",
-]
-
-[[package]]
 name = "egui_inbox"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1533,12 +1521,6 @@ dependencies = [
  "libredox",
  "windows-sys 0.59.0",
 ]
-
-[[package]]
-name = "fixedbitset"
-version = "0.5.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1d674e81391d1e1ab681a28d99df07927c6d4aa5b027d7da16ba32d1d21ecd99"
 
 [[package]]
 name = "flate2"
@@ -2922,30 +2904,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e3148f5046208a5d56bcfc03053e3ca6334e51da8dfb19b6cdc8b306fae3283e"
 
 [[package]]
-name = "petgraph"
-version = "0.7.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3672b37090dbd86368a4145bc067582552b29c27377cad4e0a306c97f9bd7772"
-dependencies = [
- "fixedbitset",
- "indexmap",
- "serde",
- "serde_derive",
-]
-
-[[package]]
-name = "petgraph"
-version = "0.8.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7a98c6720655620a521dcc722d0ad66cd8afd5d86e34a89ef691c50b7b24de06"
-dependencies = [
- "fixedbitset",
- "hashbrown",
- "indexmap",
- "serde",
-]
-
-[[package]]
 name = "pin-project"
 version = "1.1.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3837,7 +3795,6 @@ dependencies = [
  "egui",
  "egui_code_editor",
  "egui_dock",
- "egui_graphs",
  "egui_inbox",
  "enfusion_pak",
  "env_logger",
@@ -3846,7 +3803,6 @@ dependencies = [
  "log",
  "memmap2",
  "oval",
- "petgraph 0.8.1",
  "regex",
  "rfd",
  "serde",
