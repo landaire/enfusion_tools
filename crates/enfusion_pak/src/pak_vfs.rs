@@ -68,9 +68,15 @@ where
         let lookup_key = if path.is_empty() { "/" } else { path };
 
         self.entry_cache.get(lookup_key).ok_or_else(|| VfsError::from(VfsErrorKind::FileNotFound))
-        // self.entry_cache.get()
 
-        // let mut current: &FileEntry = fs;
+        // if let Some(cached) = self.entry_cache.get(lookup_key) {
+        //     return Ok(cached);
+        // }
+
+        // let pak: &PakFile = self.source.as_ref();
+        // let file_chunk = pak.file_chunk().unwrap();
+        // let Chunk::File { fs } = file_chunk else { panic!("file chunk is not a file?") };
+        // let mut current: &RcFileEntry = fs;
 
         // let path_parts = if path.starts_with("/") {
         //     path.split('/').skip(1)
@@ -94,6 +100,9 @@ where
         //         return Err(VfsError::from(VfsErrorKind::FileNotFound));
         //     }
         // }
+
+        // // Add this to the cache
+        // self.entry_cache.insert(lookup_key.to_string(), RcFileEntry::clone(&current));
 
         // Ok(current)
     }
