@@ -271,7 +271,7 @@ impl eframe::App for EnfusionToolsApp {
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.vertical(|ui| {
                 ui.horizontal(|ui| {
-                    if ui.button("Open").clicked() {
+                    if ui.button("Open PAK Files").clicked() {
                         let task = rfd::AsyncFileDialog::new().pick_files();
                         if let Some(background_task_sender) = self.internal.task_queue.clone() {
                             execute(async move {
