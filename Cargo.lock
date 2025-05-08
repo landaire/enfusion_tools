@@ -1314,6 +1314,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "egui_ltreeview"
+version = "0.2.0"
+source = "git+https://github.com/landaire-contrib/egui_ltreeview?branch=large_node_perf_fix#808c14cd405ca143b6b79cb30067a89805bc787a"
+dependencies = [
+ "egui",
+ "indexmap",
+ "serde",
+]
+
+[[package]]
 name = "either"
 version = "1.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2105,6 +2115,7 @@ checksum = "cea70ddb795996207ad57735b50c5982d8844f38ba9ee5f1aedcfb708a2aa11e"
 dependencies = [
  "equivalent",
  "hashbrown",
+ "serde",
 ]
 
 [[package]]
@@ -3796,6 +3807,7 @@ dependencies = [
  "egui_code_editor",
  "egui_dock",
  "egui_inbox",
+ "egui_ltreeview",
  "enfusion_pak",
  "env_logger",
  "futures",

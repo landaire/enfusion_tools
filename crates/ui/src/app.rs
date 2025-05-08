@@ -6,6 +6,7 @@ use egui_dock::DockArea;
 use egui_dock::DockState;
 use egui_dock::Style;
 use egui_dock::TabViewer;
+use egui_ltreeview::TreeViewState;
 use enfusion_pak::vfs::VfsPath;
 use enfusion_pak::vfs::async_vfs::AsyncVfsPath;
 use log::debug;
@@ -25,6 +26,15 @@ use crate::ui::tab::SearchData;
 use crate::ui::tab::TabKind;
 use crate::ui::tab::ToolsTabViewer;
 
+#[derive(Debug)]
+pub(crate) struct TreeNode {
+    pub id: usize,
+    pub is_dir: bool,
+    pub title: String,
+    pub close_count: usize,
+    pub vfs_path: VfsPath,
+}
+
 pub(crate) struct AppInternalData {
     pub(crate) inbox: egui_inbox::UiInbox<BackgroundTaskMessage>,
 
@@ -41,6 +51,9 @@ pub(crate) struct AppInternalData {
     pub(crate) file_filter: String,
 
     pub(crate) next_search_query_id: SearchId,
+    pub(crate) tree_view_state: TreeViewState<usize>,
+    pub(crate) tree: Vec<TreeNode>,
+    pub(crate) dir_count: usize,
 }
 
 /// We derive Deserialize/Serialize so we can persist app state on shutdown.
@@ -81,6 +94,9 @@ impl Default for EnfusionToolsApp {
                 file_filter: "".to_string(),
                 known_file_paths: Default::default(),
                 next_search_query_id: SearchId(0),
+                tree_view_state: TreeViewState::default(),
+                tree: Default::default(),
+                dir_count: 0,
             },
             opened_file_path: None,
             search_query: "".to_string(),
@@ -131,7 +147,7 @@ impl EnfusionToolsApp {
     pub fn process_message_from_background(&mut self, message: BackgroundTaskMessage) {
         match message {
             BackgroundTaskMessage::LoadedPakFiles(files) => match files {
-                Ok(mut loaded_files) => {
+                Ok((mut loaded_files, file_tree)) => {
                     #[cfg(not(target_arch = "wasm32"))]
                     {
                         self.file_paths = loaded_files
@@ -145,6 +161,15 @@ impl EnfusionToolsApp {
 
                     self.internal.overlay_fs = Some(loaded_files.overlay_fs);
                     self.internal.async_overlay_fs = Some(loaded_files.async_overlay_fs);
+
+                    self.internal.tree = file_tree;
+                    self.internal.dir_count = self
+                        .internal
+                        .tree
+                        .iter()
+                        .fold(0, |accum, node| if node.is_dir { accum + 1 } else { accum });
+
+                    if let Some(overlay_fs) = self.internal.overlay_fs.clone() {}
                 }
                 Err(e) => {
                     eprintln!("failed to load pak files: {:?}", e);
@@ -185,6 +210,10 @@ impl EnfusionToolsApp {
     }
 
     pub(crate) fn open_file(&self, file: VfsPath) {
+        if !file.is_file().unwrap_or_default() {
+            return;
+        }
+
         if let Some(task_queue) = self.internal.task_queue.as_ref() {
             debug!("sending task");
             // Get the async version of this file

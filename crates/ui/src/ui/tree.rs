@@ -7,11 +7,14 @@ use egui::Sense;
 use egui::TextEdit;
 use egui::Ui;
 use egui::Widget;
+use egui_ltreeview::NodeBuilder;
+use egui_ltreeview::TreeView;
 use enfusion_pak::vfs::VfsPath;
 use itertools::Itertools;
 use log::debug;
 
 use crate::EnfusionToolsApp;
+use crate::vfs_ext::VfsExt;
 
 impl EnfusionToolsApp {
     fn file_is_included_in_filter(&self, node: &VfsPath) -> bool {
@@ -32,14 +35,18 @@ impl EnfusionToolsApp {
     }
     fn build_file_tree_node(&mut self, node: VfsPath, open: bool, ui: &mut Ui) -> bool {
         let mut open_state_changed = false;
-        let header = CollapsingHeader::new(node.filename()).default_open(open).show(ui, |ui| {
-            for child in node.read_dir().expect("??").sorted_by_key(|path| path.filename()) {
+        let header = CollapsingHeader::new(node.filename_ref()).default_open(open).show(ui, |ui| {
+            for child in node
+                .read_dir()
+                .expect("??")
+                .sorted_by(|a, b| a.filename_ref().cmp(b.filename_ref()))
+            {
                 if !self.file_is_included_in_filter(&child) {
                     continue;
                 }
 
                 if child.is_file().unwrap_or_default() {
-                    let file_label = ui.add(Label::new(child.filename()).sense(Sense::click()));
+                    let file_label = ui.add(Label::new(child.filename_ref()).sense(Sense::click()));
                     // self.add_view_file_menu(&file_label, node);
                     if file_label.double_clicked() {
                         debug!("file double-clicked");
@@ -102,7 +109,54 @@ impl EnfusionToolsApp {
                     let mut open_state_changed = false;
                     let response = ScrollArea::both().show(ui, |ui| {
                         if let Some(overlay_fs) = self.internal.overlay_fs.clone() {
-                            open_state_changed = self.build_file_tree_node(overlay_fs, true, ui);
+                            //open_state_changed = self.build_file_tree_node(overlay_fs, true, ui);
+
+                            let (_response, actions) =
+                                TreeView::new(ui.make_persistent_id("main_fs_tree_view3"))
+                                    .allow_multi_selection(false)
+                                    .tree_size_hint(self.internal.tree.len())
+                                    .dir_count_hint(self.internal.dir_count)
+                                    .show_state(
+                                        ui,
+                                        &mut self.internal.tree_view_state,
+                                        |builder| {
+                                            for node in &self.internal.tree {
+                                                if node.is_dir {
+                                                    builder.node(
+                                                        NodeBuilder::dir(node.id)
+                                                            .default_open(false)
+                                                            .label(&node.title),
+                                                    );
+                                                } else {
+                                                    builder.leaf(node.id, &node.title);
+                                                }
+
+                                                for _ in 0..node.close_count {
+                                                    builder.close_dir();
+                                                }
+                                            }
+                                        },
+                                    );
+
+                            for action in actions {
+                                match action {
+                                    egui_ltreeview::Action::SetSelected(_items) => {
+                                        open_state_changed = true;
+                                    }
+                                    // egui_ltreeview::Action::Move(_drag_and_drop) => todo!(),
+                                    // egui_ltreeview::Action::Drag(_drag_and_drop) => todo!(),
+                                    egui_ltreeview::Action::Activate(activate) => {
+                                        for activated in activate.selected {
+                                            self.open_file(
+                                                self.internal.tree[activated].vfs_path.clone(),
+                                            );
+                                        }
+                                    }
+                                    _ => {
+                                        // do nothing,
+                                    }
+                                }
+                            }
                         }
                     });
 

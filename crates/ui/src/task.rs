@@ -19,9 +19,12 @@ use enfusion_pak::vfs::async_vfs::AsyncMemoryFS;
 use enfusion_pak::vfs::async_vfs::AsyncOverlayFS;
 use enfusion_pak::vfs::async_vfs::AsyncVfsPath;
 use futures::StreamExt;
+use itertools::Itertools;
 use log::debug;
 
+use crate::app::TreeNode;
 use crate::pak_wrapper::parse_pak_file;
+use crate::vfs_ext::VfsExt;
 
 #[derive(Debug)]
 pub struct LoadedFiles {
@@ -41,7 +44,7 @@ pub struct LineNumber(pub usize);
 
 #[derive(Debug)]
 pub enum BackgroundTaskMessage {
-    LoadedPakFiles(Result<LoadedFiles, PakError>),
+    LoadedPakFiles(Result<(LoadedFiles, Vec<TreeNode>), PakError>),
     FileDataLoaded(VfsPath, Vec<u8>),
     SearchResult(SearchId, SearchResult),
     FilesFiltered(Vec<VfsPath>),
@@ -349,13 +352,58 @@ pub fn process_background_requests(
                         }
                     }
 
+                    // Build the file tree that will be displayed
+                    let mut node_id = 0;
+                    let mut queue = vec![(0, overlay_fs.clone())];
+                    let mut file_tree = Vec::new();
+
+                    while let Some((close_count, child)) = queue.pop() {
+                        if child.is_dir().unwrap_or_default() {
+                            file_tree.push(TreeNode {
+                                id: node_id,
+                                is_dir: true,
+                                title: if node_id == 0 {
+                                    "Root".to_string()
+                                } else {
+                                    child.filename()
+                                },
+                                close_count: 0,
+                                vfs_path: child.clone(),
+                            });
+
+                            let reader = child.read_dir().expect("failed to read dir");
+
+                            let mut propagated_close = close_count + 1;
+                            for child in reader
+                                .sorted_by(|a, b| a.filename_ref().cmp(b.filename_ref()))
+                                .rev()
+                            {
+                                queue.push((propagated_close, child));
+                                propagated_close = 0;
+                            }
+                        } else {
+                            file_tree.push(TreeNode {
+                                id: node_id,
+                                is_dir: false,
+                                title: child.filename(),
+                                close_count: if close_count > 0 { close_count } else { 0 },
+                                vfs_path: child,
+                            });
+                        }
+
+                        node_id += 1;
+                    }
+
                     inbox
-                        .send(BackgroundTaskMessage::LoadedPakFiles(Ok(LoadedFiles {
-                            disk_files_parsed: parsed_handles,
-                            overlay_fs,
-                            async_overlay_fs,
-                            known_paths,
-                        })))
+                        .send(BackgroundTaskMessage::LoadedPakFiles(Ok((
+                            LoadedFiles {
+                                disk_files_parsed: parsed_handles,
+                                overlay_fs,
+                                async_overlay_fs,
+                                known_paths,
+                            },
+                            file_tree,
+                        ))))
                         .expect("failed to send completion");
                 });
             }
