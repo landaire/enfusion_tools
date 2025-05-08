@@ -9,6 +9,7 @@ use enfusion_pak::Chunk;
 use enfusion_pak::FileEntry;
 use enfusion_pak::FileEntryMeta;
 use enfusion_pak::PakFile;
+use enfusion_pak::RcFileEntry;
 use enfusion_pak::async_pak_vfs::AsyncPrime;
 use enfusion_pak::pak_vfs::Prime;
 use humansize::BINARY;
