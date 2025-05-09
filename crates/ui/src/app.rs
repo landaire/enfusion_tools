@@ -5,7 +5,6 @@ use std::sync::mpsc;
 use egui_dock::DockArea;
 use egui_dock::DockState;
 use egui_dock::Style;
-use egui_dock::TabViewer;
 use egui_ltreeview::TreeViewState;
 use enfusion_pak::vfs::VfsPath;
 use enfusion_pak::vfs::async_vfs::AsyncVfsPath;
@@ -27,7 +26,7 @@ use crate::ui::tab::TabKind;
 use crate::ui::tab::ToolsTabViewer;
 
 #[derive(Debug)]
-pub(crate) struct TreeNode {
+pub struct TreeNode {
     pub id: usize,
     pub is_dir: bool,
     pub title: String,
@@ -167,8 +166,6 @@ impl EnfusionToolsApp {
                         .tree
                         .iter()
                         .fold(0, |accum, node| if node.is_dir { accum + 1 } else { accum });
-
-                    if let Some(overlay_fs) = self.internal.overlay_fs.clone() {}
                 }
                 Err(e) => {
                     eprintln!("failed to load pak files: {:?}", e);

@@ -1,4 +1,3 @@
-use egui::TextBuffer;
 use egui::Ui;
 use egui_code_editor::CodeEditor;
 use egui_code_editor::ColorTheme;
@@ -17,6 +16,7 @@ pub enum TabKind {
 }
 
 #[derive(Clone)]
+#[allow(unused)]
 pub struct EditorData {
     pub opened_file: VfsPath,
     pub title: String,
@@ -60,7 +60,7 @@ impl ToolsTabViewer<'_> {
 
     fn build_search_results_tab(&self, search_data: &SearchData, ui: &mut Ui) {
         ui.vertical(|ui| {
-            for (idx, file_result) in search_data.results.iter().enumerate() {
+            for file_result in &search_data.results {
                 let id = ui.make_persistent_id(file_result.file.as_str());
 
                 egui::collapsing_header::CollapsingState::load_with_default_open(
