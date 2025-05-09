@@ -9,7 +9,6 @@ use egui_ltreeview::TreeViewState;
 use enfusion_pak::vfs::VfsPath;
 use enfusion_pak::vfs::async_vfs::AsyncVfsPath;
 use log::debug;
-use std::path::PathBuf;
 
 use crate::task::BackgroundTask;
 use crate::task::BackgroundTaskMessage;
@@ -124,7 +123,7 @@ impl EnfusionToolsApp {
             if !app.file_paths.is_empty() {
                 let mut pak_file_paths = Vec::new();
                 for file in &app.file_paths {
-                    let path = PathBuf::from(file);
+                    let path = std::path::PathBuf::from(file);
                     if path.exists() {
                         pak_file_paths.push(FileReference(path));
                     }
@@ -145,6 +144,7 @@ impl EnfusionToolsApp {
     pub fn process_message_from_background(&mut self, message: BackgroundTaskMessage) {
         match message {
             BackgroundTaskMessage::LoadedPakFiles(files) => match files {
+                #[allow(unused_mut)]
                 Ok((mut loaded_files, file_tree)) => {
                     #[cfg(not(target_arch = "wasm32"))]
                     {
