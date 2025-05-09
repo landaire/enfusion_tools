@@ -3927,7 +3927,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 [[package]]
 name = "vfs"
 version = "0.12.1"
-source = "git+https://github.com/landaire/rust-vfs.git?branch=fix%2Fwasm#9c742bc8441f526c0c4a49aa6315d276cf8ec10a"
+source = "git+https://github.com/landaire/rust-vfs.git?branch=fix%2Fwasm#c4341e8e7c16a019c1a1415fc8a413bf883a08d5"
 dependencies = [
  "async-recursion",
  "async-std",

@@ -6,4 +6,4 @@ resolver = "3"
 egui_ltreeview = { git = "https://github.com/landaire-contrib/egui_ltreeview", branch = "large_node_perf_fix" }
 # egui_ltreeview = { path = "/Users/lander/src/egui_ltreeview" }
 vfs = { git = "https://github.com/landaire/rust-vfs.git", branch = "fix/wasm" }
-#vfs = { path = "../rust-vfs" }
+#vfs = { version = "0.12.1", path = "../../src/rust-vfs" }

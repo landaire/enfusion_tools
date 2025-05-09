@@ -41,8 +41,6 @@ pub(crate) struct AppInternalData {
     pub(crate) task_queue: Option<mpsc::Sender<BackgroundTask>>,
     task_queue_rx: Option<mpsc::Receiver<BackgroundTask>>,
 
-    pub(crate) filtered_paths: Option<Vec<VfsPath>>,
-
     pub(crate) overlay_fs: Option<VfsPath>,
     pub(crate) async_overlay_fs: Option<AsyncVfsPath>,
     pub(crate) known_file_paths: Arc<HashMap<(FullPath, FileName), VfsPath>>,
@@ -53,6 +51,7 @@ pub(crate) struct AppInternalData {
     pub(crate) next_search_query_id: SearchId,
     pub(crate) tree_view_state: TreeViewState<usize>,
     pub(crate) tree: Vec<TreeNode>,
+    pub(crate) filtered_tree: Option<Vec<TreeNode>>,
     pub(crate) dir_count: usize,
 }
 
@@ -90,13 +89,13 @@ impl Default for EnfusionToolsApp {
                 overlay_fs: None,
                 async_overlay_fs: None,
                 opened_file_text: "".to_string(),
-                filtered_paths: None,
                 file_filter: "".to_string(),
                 known_file_paths: Default::default(),
                 next_search_query_id: SearchId(0),
                 tree_view_state: TreeViewState::default(),
                 tree: Default::default(),
                 dir_count: 0,
+                filtered_tree: None,
             },
             opened_file_path: None,
             search_query: "".to_string(),
@@ -200,8 +199,8 @@ impl EnfusionToolsApp {
                     contents: str_data,
                 }));
             }
-            BackgroundTaskMessage::FilesFiltered(vfs_paths) => {
-                self.internal.filtered_paths = Some(vfs_paths);
+            BackgroundTaskMessage::FilesFiltered(filtered_tree) => {
+                self.internal.filtered_tree = Some(filtered_tree);
             }
             BackgroundTaskMessage::RequestOpenFile(vfs_path) => {
                 self.open_file(vfs_path);

@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::collections::VecDeque;
 use std::ops::Range;
 use std::sync::Arc;
@@ -47,7 +48,7 @@ pub enum BackgroundTaskMessage {
     LoadedPakFiles(Result<(LoadedFiles, Vec<TreeNode>), PakError>),
     FileDataLoaded(VfsPath, Vec<u8>),
     SearchResult(SearchId, SearchResult),
-    FilesFiltered(Vec<VfsPath>),
+    FilesFiltered(Vec<TreeNode>),
     RequestOpenFile(VfsPath),
 }
 
@@ -63,7 +64,7 @@ pub enum BackgroundTask {
     LoadPakFiles(Vec<FileReference>),
     PerformSearch(SearchId, AsyncVfsPath, String),
     LoadFileData(VfsPath, AsyncVfsPath),
-    FilterPaths(Arc<HashMap<(FullPath, FileName), VfsPath>>, String),
+    FilterPaths(Arc<HashMap<(FullPath, FileName), VfsPath>>, VfsPath, String),
 }
 
 #[derive(Debug, Clone)]
@@ -352,47 +353,7 @@ pub fn process_background_requests(
                         }
                     }
 
-                    // Build the file tree that will be displayed
-                    let mut node_id = 0;
-                    let mut queue = vec![(0, overlay_fs.clone())];
-                    let mut file_tree = Vec::new();
-
-                    while let Some((close_count, child)) = queue.pop() {
-                        if child.is_dir().unwrap_or_default() {
-                            file_tree.push(TreeNode {
-                                id: node_id,
-                                is_dir: true,
-                                title: if node_id == 0 {
-                                    "Root".to_string()
-                                } else {
-                                    child.filename()
-                                },
-                                close_count: 0,
-                                vfs_path: child.clone(),
-                            });
-
-                            let reader = child.read_dir().expect("failed to read dir");
-
-                            let mut propagated_close = close_count + 1;
-                            for child in reader
-                                .sorted_by(|a, b| a.filename_ref().cmp(b.filename_ref()))
-                                .rev()
-                            {
-                                queue.push((propagated_close, child));
-                                propagated_close = 0;
-                            }
-                        } else {
-                            file_tree.push(TreeNode {
-                                id: node_id,
-                                is_dir: false,
-                                title: child.filename(),
-                                close_count: if close_count > 0 { close_count } else { 0 },
-                                vfs_path: child,
-                            });
-                        }
-
-                        node_id += 1;
-                    }
+                    let file_tree = build_file_tree(&overlay_fs, &known_paths, None);
 
                     inbox
                         .send(BackgroundTaskMessage::LoadedPakFiles(Ok((
@@ -457,21 +418,12 @@ pub fn process_background_requests(
                     }
                 });
             }
-            BackgroundTask::FilterPaths(known_paths, query) => {
+            BackgroundTask::FilterPaths(known_paths, root, query) => {
                 let inbox = inbox.clone();
                 execute(async move {
-                    let mut matches = Vec::new();
+                    let new_tree = build_file_tree(&root, &known_paths, Some(query));
 
-                    let query_has_path = query.contains('/');
-                    for ((FullPath(full_path), FileName(name)), vfs_path) in known_paths.iter() {
-                        let haystack = if query_has_path { full_path } else { name };
-
-                        if ascii_icontains(&query, haystack) {
-                            matches.push(vfs_path.clone());
-                        }
-                    }
-
-                    let _ = inbox.send(BackgroundTaskMessage::FilesFiltered(matches));
+                    let _ = inbox.send(BackgroundTaskMessage::FilesFiltered(new_tree));
                 });
             }
         }
@@ -498,6 +450,105 @@ fn ascii_icontains(needle: &str, haystack: &str) -> bool {
 
         true
     })
+}
+
+fn build_file_tree(
+    path: &VfsPath,
+    known_files: &HashMap<(FullPath, FileName), VfsPath>,
+    filter: Option<String>,
+) -> Vec<TreeNode> {
+    // Build the file tree that will be displayed
+    let mut node_id = 0;
+    let mut queue = vec![(0, path.clone())];
+    let mut file_tree = Vec::new();
+
+    // For filtered trees we need to do things slightly differently:
+    // 1. First filter using the known file paths
+    // 2. Begin building the tree
+    // 3. Using the results from #1 in the tree loop, check to see if the path is a parent
+    // or descendent of a filtered tree.
+
+    let mut is_file_cache = HashSet::new();
+
+    let filtered_files = {
+        let query_has_path = filter.as_ref().map(|f| f.contains('/')).unwrap_or_default();
+        let mut filtered_files = Vec::new();
+
+        for ((FullPath(full_path), FileName(file_name)), vfs_path) in known_files.iter() {
+            if vfs_path.is_file().unwrap_or_default() {
+                is_file_cache.insert(vfs_path.as_str());
+            }
+
+            let haystack = if query_has_path { full_path.as_str() } else { file_name.as_str() };
+
+            if let Some(query) = filter.as_ref() {
+                if ascii_icontains(query, haystack) {
+                    filtered_files.push(vfs_path.clone());
+                }
+            }
+        }
+
+        if filter.is_some() { Some(filtered_files) } else { None }
+    };
+
+    while let Some((close_count, child)) = queue.pop() {
+        let is_included_in_filter = |child: &VfsPath| {
+            if let Some(filtered_files) = filtered_files.as_ref() {
+                filtered_files.iter().any(|node| {
+                    if is_file_cache.contains(child.as_str()) {
+                        child == node
+                    } else {
+                        node.parent().as_str().starts_with(child.as_str())
+                    }
+                })
+            } else {
+                true
+            }
+        };
+
+        if is_included_in_filter(&child) {
+            if !is_file_cache.contains(child.as_str()) {
+                file_tree.push(TreeNode {
+                    id: node_id,
+                    is_dir: true,
+                    title: if node_id == 0 { "Root".to_string() } else { child.filename() },
+                    close_count: 0,
+                    vfs_path: child.clone(),
+                });
+
+                let reader = child.read_dir().expect("failed to read dir");
+
+                let mut propagated_close = close_count + 1;
+                let mut has_children = false;
+                for child in reader
+                    .sorted_by(|a, b| a.filename_ref().cmp(b.filename_ref()))
+                    .filter(is_included_in_filter)
+                    .rev()
+                {
+                    queue.push((propagated_close, child));
+                    propagated_close = 0;
+                    has_children = true;
+                }
+
+                if !has_children {
+                    // This dir needs to close itself -- it's an empty folder
+                    file_tree.last_mut().unwrap().close_count = 1;
+                }
+            } else {
+                file_tree.push(TreeNode {
+                    id: node_id,
+                    is_dir: false,
+                    title: child.filename(),
+                    close_count,
+                    vfs_path: child,
+                });
+            }
+        }
+
+        node_id += 1;
+    }
+
+    file_tree
 }
 
 #[cfg(not(target_arch = "wasm32"))]
