@@ -90,9 +90,7 @@ impl EnfusionToolsApp {
                                 // egui_ltreeview::Action::Drag(_drag_and_drop) => todo!(),
                                 egui_ltreeview::Action::Activate(activate) => {
                                     for activated in activate.selected {
-                                        self.open_file(
-                                            self.internal.tree[activated].vfs_path.clone(),
-                                        );
+                                        self.open_file(tree[activated].vfs_path.clone());
                                     }
                                 }
                                 _ => {
