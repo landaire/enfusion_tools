@@ -20,9 +20,7 @@ Prebuilt binaries can be found on the [Releases](https://github.com/landaire/enf
 
 ![enfusion_tools running on macOS](res/native_screenshot.png)
 
-Demo of the application running in web:
-
-[![Demo of enfusion_tools running as a web application](https://img.youtube.com/vi/Ps1BfcD3Hcs/0.jpg)](https://www.youtube.com/watch?v=Ps1BfcD3Hcs)
+Demo of the application running in web: https://www.youtube.com/watch?v=Ps1BfcD3Hcs
 
 ## Building
 
