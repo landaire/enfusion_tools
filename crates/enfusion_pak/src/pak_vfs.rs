@@ -36,13 +36,15 @@ where
         let file_chunk = pak.file_chunk().unwrap();
         let Chunk::File { fs } = file_chunk else { panic!("file chunk is not a file?") };
 
-        let mut queue = vec![(PathBuf::from("/"), RcFileEntry::clone(fs))];
+        let mut queue = vec![("".to_string(), RcFileEntry::clone(fs))];
         while let Some((path, current)) = queue.pop() {
-            let this_path = path.join(current.name());
-            // if !RcFileEntry::ptr_eq(&current, fs) {
-            let key = this_path.to_str().expect("could not convert path to str").to_string();
+            let this_path = if path == "/" {
+                format!("{}{}", path, current.name())
+            } else {
+                format!("{}/{}", path, current.name())
+            };
+            let key = this_path.clone();
             entry_cache.insert(key, RcFileEntry::clone(&current));
-            // }
 
             match current.meta() {
                 FileEntryMeta::Folder { children } => {
