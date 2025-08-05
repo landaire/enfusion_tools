@@ -1,18 +1,28 @@
+use std::sync::Arc;
+
+use egui::Color32;
+use egui::TextFormat;
 use egui::Ui;
+use egui::text::LayoutJob;
 use egui_code_editor::CodeEditor;
 use egui_code_editor::ColorTheme;
 use egui_code_editor::Syntax;
 use enfusion_pak::vfs::VfsPath;
 
 use crate::app::AppInternalData;
+use crate::diff;
+use crate::diff::DiffResult;
+use crate::task;
 use crate::task::LineNumber;
 use crate::task::SearchId;
 use crate::task::SearchResult;
+use crate::task::execute;
 
 #[derive(Clone)]
 pub enum TabKind {
     Editor(EditorData),
     SearchResults(SearchData),
+    Diff(DiffData),
 }
 
 #[derive(Clone)]
@@ -32,11 +42,19 @@ pub struct SearchData {
     pub results: Vec<SearchResult>,
 }
 
+#[derive(Clone)]
+pub struct DiffData {
+    pub modified: Vec<diff::DiffResult>,
+    pub modified_filtered: Option<Vec<diff::DiffResult>>,
+    pub path_filter: String,
+}
+
 impl TabKind {
     pub fn title(&self) -> &str {
         match self {
             TabKind::Editor(data) => data.title.as_str(),
             TabKind::SearchResults(data) => data.tab_title.as_str(),
+            TabKind::Diff(_results) => "Diff",
         }
     }
 }
@@ -106,6 +124,96 @@ impl ToolsTabViewer<'_> {
             }
         });
     }
+
+    fn build_diff_tab(&self, diff_data: &mut DiffData, ui: &mut Ui) {
+        ui.vertical(|ui| {
+            ui.horizontal(|ui| {
+                ui.label("Path Filter:");
+                if ui.text_edit_singleline(&mut diff_data.path_filter).changed() {
+                    diff_data.modified_filtered = Some(
+                        diff_data
+                            .modified
+                            .iter()
+                            .filter(|diff| {
+                                task::ascii_icontains(
+                                    &diff_data.path_filter,
+                                    diff.comparison_path(),
+                                )
+                            })
+                            .cloned()
+                            .collect(),
+                    );
+                }
+            });
+            let modified = if let Some(filtered) = &diff_data.modified_filtered {
+                filtered
+            } else {
+                &diff_data.modified
+            };
+            for result in modified {
+                let mut heading = LayoutJob::default();
+                match result {
+                    DiffResult::Added { path, overlay, data } => {
+                        heading.append(
+                            path.as_str(),
+                            0.0,
+                            TextFormat { color: Color32::DARK_GREEN, ..Default::default() },
+                        );
+
+                        ui.collapsing(heading, |ui| {
+                            let data_inner = data.lock().unwrap();
+                            if let Some(data_inner) = &*data_inner {
+                                ui.label(Arc::clone(data_inner));
+                            } else {
+                                let added_file = overlay.join(path.as_str()).unwrap();
+                                let output = Arc::clone(data);
+                                execute(async move {
+                                    if let Some(data) = task::read_file_data(added_file)
+                                        .await
+                                        .and_then(|data| String::from_utf8(data).ok())
+                                    {
+                                        let mut job = LayoutJob::default();
+                                        job.append(data.as_str(), 0.0, Default::default());
+                                        *output.lock().unwrap() = Some(job.into());
+                                    } else {
+                                        *output.lock().unwrap() = Some(LayoutJob::default().into());
+                                    }
+                                });
+                            }
+                        });
+                    }
+                    DiffResult::Changed {
+                        base_path,
+                        base_overlay,
+                        modified_path,
+                        modified_overlay,
+                        data,
+                    } => {
+                        heading.append(
+                            base_path.as_str(),
+                            0.0,
+                            TextFormat { color: Color32::ORANGE, ..Default::default() },
+                        );
+
+                        ui.collapsing(heading, |ui| {
+                            let data_inner = data.lock().unwrap();
+                            if let Some(data_inner) = &*data_inner {
+                                ui.label(Arc::clone(data_inner));
+                            } else {
+                                let base = base_overlay.join(base_path.as_str()).unwrap();
+                                let modified =
+                                    modified_overlay.join(modified_path.as_str()).unwrap();
+                                let output = Arc::clone(data);
+                                execute(async move {
+                                    diff::build_file_diff(base, modified, output).await;
+                                });
+                            }
+                        });
+                    }
+                }
+            }
+        });
+    }
 }
 
 impl egui_dock::TabViewer for ToolsTabViewer<'_> {
@@ -122,6 +230,9 @@ impl egui_dock::TabViewer for ToolsTabViewer<'_> {
             }
             TabKind::SearchResults(search_data) => {
                 self.build_search_results_tab(search_data, ui);
+            }
+            TabKind::Diff(diff_data) => {
+                self.build_diff_tab(diff_data, ui);
             }
         }
     }

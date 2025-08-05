@@ -44,6 +44,7 @@ async-trait = "0.1.88"
 #petgraph = "0.8.1"
 egui_dock = "0.17.0"
 egui_ltreeview = { version = "0.5.3", features = ["persistence"] }
+similar = "2.7.0"
 
 # native:
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]

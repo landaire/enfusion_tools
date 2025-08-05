@@ -216,7 +216,7 @@ pub async fn parse_pak_file(file_handle: FileReference) -> WrappedPakFile {
                 unreachable!("This should never occur");
             }
             Err(e) => {
-                panic!("error reading pak file: {:?}", e)
+                panic!("error reading pak file: {e:?}")
             }
         }
     }

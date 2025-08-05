@@ -19,6 +19,7 @@ use crate::task::SearchId;
 use crate::task::execute;
 use crate::task::process_background_requests;
 use crate::task::start_background_thread;
+use crate::ui::tab::DiffData;
 use crate::ui::tab::EditorData;
 use crate::ui::tab::SearchData;
 use crate::ui::tab::TabKind;
@@ -33,6 +34,8 @@ pub struct TreeNode {
     pub vfs_path: VfsPath,
 }
 
+pub(crate) type KnownPaths = HashMap<(FullPath, FileName), VfsPath>;
+
 pub(crate) struct AppInternalData {
     pub(crate) inbox: egui_inbox::UiInbox<BackgroundTaskMessage>,
 
@@ -41,7 +44,7 @@ pub(crate) struct AppInternalData {
 
     pub(crate) overlay_fs: Option<VfsPath>,
     pub(crate) async_overlay_fs: Option<AsyncVfsPath>,
-    pub(crate) known_file_paths: Arc<HashMap<(FullPath, FileName), VfsPath>>,
+    pub(crate) known_file_paths: Arc<KnownPaths>,
 
     pub(crate) opened_file_text: String,
     pub(crate) file_filter: String,
@@ -206,6 +209,19 @@ impl EnfusionToolsApp {
             BackgroundTaskMessage::RequestOpenFile(vfs_path) => {
                 self.open_file(vfs_path);
             }
+            BackgroundTaskMessage::FilesDiffed(diff_results) => match diff_results {
+                Ok(results) => {
+                    let surface = self.dock_state.main_surface_mut();
+                    surface.push_to_first_leaf(TabKind::Diff(DiffData {
+                        modified: results,
+                        modified_filtered: Default::default(),
+                        path_filter: Default::default(),
+                    }));
+                }
+                Err(e) => {
+                    eprintln!("failed to load pak files: {e:?}");
+                }
+            },
         }
     }
 
@@ -250,7 +266,7 @@ impl eframe::App for EnfusionToolsApp {
         egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
             // The top panel is often a good place for a menu bar:
 
-            egui::menu::bar(ui, |ui| {
+            egui::MenuBar::new().ui(ui, |ui| {
                 // NOTE: no File->Quit on web pages!
                 let is_web = cfg!(target_arch = "wasm32");
                 if !is_web {
@@ -293,6 +309,50 @@ impl eframe::App for EnfusionToolsApp {
                                                 })
                                                 .collect(),
                                         ));
+                                }
+                            });
+                        }
+                    }
+                    if ui.button("Diff Builds").clicked() {
+                        if let Some(background_task_sender) = self.internal.task_queue.clone() {
+                            execute(async move {
+                                let base_files = rfd::AsyncFileDialog::new().pick_files().await;
+                                if let Some(mut base_files) = base_files {
+                                    let modified_files =
+                                        rfd::AsyncFileDialog::new().pick_files().await;
+                                    if let Some(mut modified_files) = modified_files {
+                                        #[cfg(target_arch = "wasm32")]
+                                        let _ = background_task_sender.send(
+                                            BackgroundTask::DiffBuilds {
+                                                base: base_files
+                                                    .drain(..)
+                                                    .map(FileReference)
+                                                    .collect(),
+                                                modified: modified_files
+                                                    .drain(..)
+                                                    .map(FileReference)
+                                                    .collect(),
+                                            },
+                                        );
+
+                                        #[cfg(not(target_arch = "wasm32"))]
+                                        let _ = background_task_sender.send(
+                                            BackgroundTask::DiffBuilds {
+                                                base: base_files
+                                                    .drain(..)
+                                                    .map(|handle| {
+                                                        FileReference(handle.path().to_owned())
+                                                    })
+                                                    .collect(),
+                                                modified: modified_files
+                                                    .drain(..)
+                                                    .map(|handle| {
+                                                        FileReference(handle.path().to_owned())
+                                                    })
+                                                    .collect(),
+                                            },
+                                        );
+                                    }
                                 }
                             });
                         }

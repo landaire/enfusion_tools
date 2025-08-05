@@ -1,3 +1,4 @@
+pub(crate) mod diff_viewer;
 pub(crate) mod search;
 pub(crate) mod tab;
 pub(crate) mod text_viewer;

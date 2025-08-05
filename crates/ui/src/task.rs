@@ -23,7 +23,9 @@ use futures::StreamExt;
 use itertools::Itertools;
 use log::debug;
 
+use crate::app::KnownPaths;
 use crate::app::TreeNode;
+use crate::diff;
 use crate::pak_wrapper::parse_pak_file;
 use crate::vfs_ext::VfsExt;
 
@@ -32,7 +34,7 @@ pub struct LoadedFiles {
     pub disk_files_parsed: Vec<FileReference>,
     pub overlay_fs: VfsPath,
     pub async_overlay_fs: AsyncVfsPath,
-    pub known_paths: HashMap<(FullPath, FileName), VfsPath>,
+    pub known_paths: KnownPaths,
 }
 
 #[repr(transparent)]
@@ -50,22 +52,27 @@ pub enum BackgroundTaskMessage {
     SearchResult(SearchId, SearchResult),
     FilesFiltered(Vec<TreeNode>),
     RequestOpenFile(VfsPath),
+    FilesDiffed(Result<Vec<diff::DiffResult>, PakError>),
 }
 
 #[repr(transparent)]
-#[derive(PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
-pub struct FullPath(String);
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+pub struct FullPath(pub String);
 
 #[repr(transparent)]
-#[derive(PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
-pub struct FileName(String);
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+pub struct FileName(pub String);
 
 pub enum BackgroundTask {
     /// Requests the background thread to begin parsing PAK files.
     LoadPakFiles(Vec<FileReference>),
     PerformSearch(SearchId, AsyncVfsPath, String),
     LoadFileData(VfsPath, AsyncVfsPath),
-    FilterPaths(Arc<HashMap<(FullPath, FileName), VfsPath>>, VfsPath, String),
+    FilterPaths(Arc<KnownPaths>, VfsPath, String),
+    DiffBuilds {
+        base: Vec<FileReference>,
+        modified: Vec<FileReference>,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -287,85 +294,10 @@ pub fn process_background_requests(
             BackgroundTask::LoadPakFiles(handles) => {
                 let inbox = inbox.clone();
                 execute(async move {
-                    let mut parsed_paths = Vec::with_capacity(handles.len() + 1);
-                    parsed_paths.push(VfsPath::new(MemoryFS::new()));
-
-                    let mut parsed_async_paths = Vec::with_capacity(handles.len() + 1);
-                    parsed_async_paths.push(AsyncVfsPath::new(AsyncMemoryFS::new()));
-
-                    let mut parsed_handles = Vec::with_capacity(handles.len());
-                    for handle in handles {
-                        #[cfg(target_arch = "wasm32")]
-                        {
-                            let cloned = handle.clone();
-                            match Ok(parse_pak_file(cloned).await) {
-                                Ok(parsed_file) => {
-                                    let vfs = PakVfs::new(Arc::new(parsed_file));
-                                    parsed_paths.push(VfsPath::new(vfs.clone()));
-                                    parsed_async_paths.push(AsyncVfsPath::new(vfs));
-                                    parsed_handles.push(handle);
-                                }
-                                Err(e) => {
-                                    inbox
-                                        .send(BackgroundTaskMessage::LoadedPakFiles(Err(e)))
-                                        .expect("failed to send completion");
-                                }
-                            }
-                        }
-                        #[cfg(not(target_arch = "wasm32"))]
-                        {
-                            let cloned = handle.clone();
-                            match parse_pak_file(cloned.0) {
-                                Ok(parsed_file) => {
-                                    let vfs = PakVfs::new(Arc::new(parsed_file));
-                                    parsed_paths.push(VfsPath::new(vfs.clone()));
-                                    parsed_async_paths.push(AsyncVfsPath::new(vfs));
-                                    parsed_handles.push(handle);
-                                }
-                                Err(e) => {
-                                    inbox
-                                        .send(BackgroundTaskMessage::LoadedPakFiles(Err(e)))
-                                        .expect("failed to send completion");
-                                }
-                            }
-                        }
-                    }
-
-                    let overlay_fs = VfsPath::new(OverlayFS::new(&parsed_paths));
-                    let async_overlay_fs =
-                        AsyncVfsPath::new(AsyncOverlayFS::new(&parsed_async_paths));
-
-                    let mut known_paths = HashMap::new();
-                    let mut queue = vec![overlay_fs.clone()];
-
-                    while let Some(next) = queue.pop() {
-                        if next != overlay_fs {
-                            let full_path = next.as_str().to_string();
-                            let name = next.filename();
-
-                            known_paths.insert((FullPath(full_path), FileName(name)), next.clone());
-                        }
-
-                        let Ok(reader) = next.read_dir() else {
-                            continue;
-                        };
-                        for child in reader {
-                            queue.push(child);
-                        }
-                    }
-
-                    let file_tree = build_file_tree(&overlay_fs, &known_paths, None);
-
                     inbox
-                        .send(BackgroundTaskMessage::LoadedPakFiles(Ok((
-                            LoadedFiles {
-                                disk_files_parsed: parsed_handles,
-                                overlay_fs,
-                                async_overlay_fs,
-                                known_paths,
-                            },
-                            file_tree,
-                        ))))
+                        .send(BackgroundTaskMessage::LoadedPakFiles(
+                            load_pak_files_from_handles(handles).await,
+                        ))
                         .expect("failed to send completion");
                 });
             }
@@ -399,23 +331,9 @@ pub fn process_background_requests(
                         .join(vfs_path.as_str())
                         .expect("could not map sync path to async path");
 
-                    debug!("got the async vfs path: {async_vfs_path:?}");
-                    let metadata = async_vfs_path.metadata().await;
-                    debug!("meta: {metadata:?}");
-                    if let Ok(metadata) = metadata {
-                        if let Ok(mut reader) = async_vfs_path.open_file().await {
-                            let mut file_data = Vec::with_capacity(metadata.len as usize);
-                            debug!("got the reader");
-
-                            async_std::io::copy(&mut reader, &mut file_data)
-                                .await
-                                .expect("faile dto copy data");
-
-                            debug!("sending data back to UI thread");
-
-                            let _ = sender
-                                .send(BackgroundTaskMessage::FileDataLoaded(vfs_path, file_data));
-                        }
+                    if let Some(file_data) = read_file_data(async_vfs_path).await {
+                        let _ =
+                            sender.send(BackgroundTaskMessage::FileDataLoaded(vfs_path, file_data));
                     }
                 });
             }
@@ -427,11 +345,112 @@ pub fn process_background_requests(
                     let _ = inbox.send(BackgroundTaskMessage::FilesFiltered(new_tree));
                 });
             }
+            BackgroundTask::DiffBuilds { base, modified } => {
+                let inbox = inbox.clone();
+                execute(async move {
+                    let (base_loaded, _) = match load_pak_files_from_handles(base).await {
+                        Ok(loaded) => loaded,
+                        Err(e) => {
+                            let _ = inbox.send(BackgroundTaskMessage::FilesDiffed(Err(e)));
+                            return;
+                        }
+                    };
+
+                    let (modified_loaded, _) = match load_pak_files_from_handles(modified).await {
+                        Ok(loaded) => loaded,
+                        Err(e) => {
+                            let _ = inbox.send(BackgroundTaskMessage::FilesDiffed(Err(e)));
+                            return;
+                        }
+                    };
+
+                    let modified = diff::diff_builds(base_loaded, modified_loaded).await;
+
+                    let _ = inbox.send(BackgroundTaskMessage::FilesDiffed(Ok(modified)));
+                });
+            }
         }
     }
 }
 
-fn ascii_icontains(needle: &str, haystack: &str) -> bool {
+pub async fn read_file_data(path: AsyncVfsPath) -> Option<Vec<u8>> {
+    let metadata = path.metadata().await.ok()?;
+    let mut reader = path.open_file().await.ok()?;
+    let mut file_data = Vec::with_capacity(metadata.len as usize);
+    debug!("got the reader");
+
+    async_std::io::copy(&mut reader, &mut file_data).await.expect("failed to copy data");
+
+    Some(file_data)
+}
+
+async fn load_pak_files_from_handles(
+    handles: Vec<FileReference>,
+) -> Result<(LoadedFiles, Vec<TreeNode>), PakError> {
+    let mut parsed_paths = Vec::with_capacity(handles.len() + 1);
+    parsed_paths.push(VfsPath::new(MemoryFS::new()));
+
+    let mut parsed_async_paths = Vec::with_capacity(handles.len() + 1);
+    parsed_async_paths.push(AsyncVfsPath::new(AsyncMemoryFS::new()));
+
+    let mut parsed_handles = Vec::with_capacity(handles.len());
+    for handle in handles {
+        #[cfg(target_arch = "wasm32")]
+        {
+            let cloned = handle.clone();
+            let parsed_file = parse_pak_file(cloned).await;
+            let vfs = PakVfs::new(Arc::new(parsed_file));
+            parsed_paths.push(VfsPath::new(vfs.clone()));
+            parsed_async_paths.push(AsyncVfsPath::new(vfs));
+            parsed_handles.push(handle);
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let cloned = handle.clone();
+            let parsed_file = parse_pak_file(cloned.0)?;
+            let vfs = PakVfs::new(Arc::new(parsed_file));
+            parsed_paths.push(VfsPath::new(vfs.clone()));
+            parsed_async_paths.push(AsyncVfsPath::new(vfs));
+            parsed_handles.push(handle);
+        }
+    }
+
+    let overlay_fs = VfsPath::new(OverlayFS::new(&parsed_paths));
+    let async_overlay_fs = AsyncVfsPath::new(AsyncOverlayFS::new(&parsed_async_paths));
+
+    let mut known_paths = HashMap::new();
+    let mut queue = vec![overlay_fs.clone()];
+
+    while let Some(next) = queue.pop() {
+        if next != overlay_fs {
+            let full_path = next.as_str().to_string();
+            let name = next.filename();
+
+            known_paths.insert((FullPath(full_path), FileName(name)), next.clone());
+        }
+
+        let Ok(reader) = next.read_dir() else {
+            continue;
+        };
+        for child in reader {
+            queue.push(child);
+        }
+    }
+
+    let file_tree = build_file_tree(&overlay_fs, &known_paths, None);
+
+    Ok((
+        LoadedFiles {
+            disk_files_parsed: parsed_handles,
+            overlay_fs,
+            async_overlay_fs,
+            known_paths,
+        },
+        file_tree,
+    ))
+}
+
+pub fn ascii_icontains(needle: &str, haystack: &str) -> bool {
     if needle.is_empty() {
         return true;
     }
