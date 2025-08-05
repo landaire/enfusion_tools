@@ -157,7 +157,7 @@ impl ToolsTabViewer<'_> {
                         heading.append(
                             path.as_str(),
                             0.0,
-                            TextFormat { color: Color32::DARK_GREEN, ..Default::default() },
+                            TextFormat { color: Color32::LIGHT_GREEN, ..Default::default() },
                         );
 
                         ui.collapsing(heading, |ui| {

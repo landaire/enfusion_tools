@@ -161,11 +161,11 @@ pub async fn build_file_diff(
         let (sign, color) = match change.tag() {
             ChangeTag::Delete => {
                 distance_from_change = 0;
-                ("-", Some(Color32::DARK_RED))
+                ("-", Some(Color32::LIGHT_RED))
             }
             ChangeTag::Insert => {
                 distance_from_change = 0;
-                ("+", Some(Color32::DARK_GREEN))
+                ("+", Some(Color32::LIGHT_GREEN))
             }
             ChangeTag::Equal => {
                 distance_from_change += 1;
