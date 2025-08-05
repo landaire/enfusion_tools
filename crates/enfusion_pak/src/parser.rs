@@ -170,7 +170,7 @@ impl TryFrom<u8> for FileEntryKind {
             0 => Self::Folder,
             1 => Self::File,
             _ => {
-                panic!("unknown file entry kind: {:#X}", value);
+                panic!("unknown file entry kind: {value:#X}");
             }
         };
 
@@ -246,7 +246,7 @@ impl PakFile {
                     return Err(PakError::ParserError(e));
                 }
                 Err(e) => {
-                    panic!("Unknown error occurred: {:?}", e);
+                    panic!("Unknown error occurred: {e:?}");
                 }
             }
         }
@@ -314,11 +314,10 @@ impl PakParser {
         // If we've reached the end of the file, we're done. This check must come last
         // to ensure all of the above state transitions can handle anything they need
         // to do.
-        if let Some(pak_len) = self.pak_len {
-            if self.bytes_parsed == pak_len {
+        if let Some(pak_len) = self.pak_len
+            && self.bytes_parsed == pak_len {
                 self.state = PakParserState::Done;
             }
-        }
     }
 
     pub fn parse_impl(mut self, input: &mut Stream) -> WResult<ParserStateMachine> {
@@ -366,13 +365,12 @@ impl PakParser {
 
                 let skip_from = self.bytes_parsed - skip;
 
-                if let Some(chunk) = chunk {
-                    if let Chunk::Form { file_size, .. } = &chunk {
+                if let Some(chunk) = chunk
+                    && let Chunk::Form { file_size, .. } = &chunk {
                         // TODO: we shouldn't read the PAC1 data here
                         self.pak_len = Some((*file_size as usize) + (bytes_consumed - 4));
                         self.chunks.push(chunk);
                     }
-                }
 
                 if skip > 0 {
                     return Ok(ParserStateMachine::Skip {
@@ -575,7 +573,7 @@ fn parse_form_chunk(input: &mut Stream) -> WResult<Parsed> {
     let pak_file_type = match &pak_type_bytes {
         b"PAC1" => PakType::PAC1,
         unk => {
-            panic!("unknown pak type: {:?}", unk);
+            panic!("unknown pak type: {unk:?}");
         }
     };
 

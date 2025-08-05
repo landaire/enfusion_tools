@@ -1,4 +1,3 @@
-use async_std::path::PathBuf;
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::io::Cursor;
@@ -152,7 +151,7 @@ where
         if *compressed != 0 {
             let mut decoder = flate2::read::ZlibDecoder::new(source_range);
             std::io::copy(&mut decoder, &mut data).map_err(|err| {
-                println!("error occurred during decompression: {:#?}", err);
+                println!("error occurred during decompression: {err:#?}");
                 println!("offset: {:#X?}", *offset);
                 VfsError::from(VfsErrorKind::IoError(err))
             })?;
