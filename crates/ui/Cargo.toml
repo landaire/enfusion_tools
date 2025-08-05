@@ -15,8 +15,8 @@ targets = [
 ]
 
 [dependencies]
-egui = "0.31"
-eframe = { version = "0.31", default-features = false, features = [
+egui = "0.32"
+eframe = { version = "0.32", default-features = false, features = [
     "accesskit",     # Make egui compatible with screen readers. NOTE: adds a lot of dependencies.
     "default_fonts", # Embed the default egui fonts.
     "glow",          # Use the glow rendering backend. Alternative: "wgpu".
@@ -29,21 +29,21 @@ log = "0.4.27"
 # You only need serde if you want app persistence:
 serde = { version = "1.0.219", features = ["derive"] }
 rfd = { version = "0.15.3", features = ["file-handle-inner"] }
-egui_inbox = "0.8.0"
+egui_inbox = "0.9.0"
 enfusion_pak = { version = "*", path = "../enfusion_pak", features = [
     "async_vfs",
     "arc",
 ] }
 itertools = "0.14.0"
-egui_code_editor = "0.2.13"
+egui_code_editor = "0.2.17"
 regex = "1.11.1"
 futures = "0.3.31"
 async-std = "1.13.1"
 async-trait = "0.1.88"
 #egui_graphs = "0.25.0"
 #petgraph = "0.8.1"
-egui_dock = "0.16.0"
-egui_ltreeview = { version = "0.2.0", features = ["persistence"] }
+egui_dock = "0.17.0"
+egui_ltreeview = { version = "0.5.3", features = ["persistence"] }
 
 # native:
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]

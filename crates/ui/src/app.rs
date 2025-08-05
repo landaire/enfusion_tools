@@ -50,6 +50,7 @@ pub(crate) struct AppInternalData {
     pub(crate) tree_view_state: TreeViewState<usize>,
     pub(crate) tree: Vec<TreeNode>,
     pub(crate) filtered_tree: Option<Vec<TreeNode>>,
+    pub(crate) open_nodes: Vec<bool>,
     pub(crate) dir_count: usize,
 }
 
@@ -94,6 +95,7 @@ impl Default for EnfusionToolsApp {
                 tree: Default::default(),
                 dir_count: 0,
                 filtered_tree: None,
+                open_nodes: vec![],
             },
             opened_file_path: None,
             search_query: "".to_string(),
@@ -166,9 +168,11 @@ impl EnfusionToolsApp {
                         .tree
                         .iter()
                         .fold(0, |accum, node| if node.is_dir { accum + 1 } else { accum });
+                    self.internal.open_nodes.clear();
+                    self.internal.open_nodes.push(true);
                 }
                 Err(e) => {
-                    eprintln!("failed to load pak files: {:?}", e);
+                    eprintln!("failed to load pak files: {e:?}");
                 }
             },
             BackgroundTaskMessage::SearchResult(search_id, search_result) => {
@@ -316,7 +320,7 @@ impl eframe::App for EnfusionToolsApp {
                                 let query = self.search_query.clone();
                                 self.dock_state.main_surface_mut().push_to_first_leaf(
                                     TabKind::SearchResults(SearchData {
-                                        tab_title: format!("{} - Search Results", query),
+                                        tab_title: format!("{query} - Search Results"),
                                         query: self.search_query.clone(),
                                         id: search_id,
                                         results: Default::default(),

@@ -59,6 +59,7 @@ pub struct FullPath(String);
 #[repr(transparent)]
 #[derive(PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct FileName(String);
+
 pub enum BackgroundTask {
     /// Requests the background thread to begin parsing PAK files.
     LoadPakFiles(Vec<FileReference>),
@@ -398,9 +399,9 @@ pub fn process_background_requests(
                         .join(vfs_path.as_str())
                         .expect("could not map sync path to async path");
 
-                    debug!("got the async vfs path: {:?}", async_vfs_path);
+                    debug!("got the async vfs path: {async_vfs_path:?}");
                     let metadata = async_vfs_path.metadata().await;
-                    debug!("meta: {:?}", metadata);
+                    debug!("meta: {metadata:?}");
                     if let Ok(metadata) = metadata {
                         if let Ok(mut reader) = async_vfs_path.open_file().await {
                             let mut file_data = Vec::with_capacity(metadata.len as usize);

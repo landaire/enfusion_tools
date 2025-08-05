@@ -61,22 +61,45 @@ impl EnfusionToolsApp {
                         let (_response, actions) =
                             TreeView::new(ui.make_persistent_id("main_fs_tree_view"))
                                 .allow_multi_selection(false)
-                                .tree_size_hint(self.internal.tree.len())
-                                .dir_count_hint(self.internal.dir_count)
+                                // .tree_size_hint(self.internal.tree.len())
+                                // .dir_count_hint(self.internal.dir_count)
                                 .show_state(ui, &mut self.internal.tree_view_state, |builder| {
                                     for node in tree {
-                                        if node.is_dir {
-                                            builder.node(
-                                                NodeBuilder::dir(node.id)
-                                                    .default_open(node.id == 0)
-                                                    .label(&node.title),
-                                            );
-                                        } else {
-                                            builder.leaf(node.id, &node.title);
+                                        let parent_is_open = *self
+                                            .internal
+                                            .open_nodes
+                                            .last()
+                                            .expect("no parent open flag?");
+                                        if parent_is_open {
+                                            if node.is_dir {
+                                                let is_open = builder.node(
+                                                    NodeBuilder::dir(node.id)
+                                                        .default_open(node.id == 0)
+                                                        .label(&node.title),
+                                                );
+
+                                                if !is_open {
+                                                    builder.close_dir();
+                                                }
+
+                                                self.internal.open_nodes.push(is_open);
+                                            } else {
+                                                builder.leaf(node.id, &node.title);
+                                            }
+                                        } else if node.is_dir {
+                                            self.internal.open_nodes.push(false);
                                         }
 
+                                        // If this node is supposed to close its parents
                                         for _ in 0..node.close_count {
-                                            builder.close_dir();
+                                            if self
+                                                .internal
+                                                .open_nodes
+                                                .pop()
+                                                .expect("treeview open state has depth mismatch?")
+                                            {
+                                                builder.close_dir();
+                                            }
                                         }
                                     }
                                 });
