@@ -315,9 +315,10 @@ impl PakParser {
         // to ensure all of the above state transitions can handle anything they need
         // to do.
         if let Some(pak_len) = self.pak_len
-            && self.bytes_parsed == pak_len {
-                self.state = PakParserState::Done;
-            }
+            && self.bytes_parsed == pak_len
+        {
+            self.state = PakParserState::Done;
+        }
     }
 
     pub fn parse_impl(mut self, input: &mut Stream) -> WResult<ParserStateMachine> {
@@ -366,11 +367,12 @@ impl PakParser {
                 let skip_from = self.bytes_parsed - skip;
 
                 if let Some(chunk) = chunk
-                    && let Chunk::Form { file_size, .. } = &chunk {
-                        // TODO: we shouldn't read the PAC1 data here
-                        self.pak_len = Some((*file_size as usize) + (bytes_consumed - 4));
-                        self.chunks.push(chunk);
-                    }
+                    && let Chunk::Form { file_size, .. } = &chunk
+                {
+                    // TODO: we shouldn't read the PAC1 data here
+                    self.pak_len = Some((*file_size as usize) + (bytes_consumed - 4));
+                    self.chunks.push(chunk);
+                }
 
                 if skip > 0 {
                     return Ok(ParserStateMachine::Skip {
