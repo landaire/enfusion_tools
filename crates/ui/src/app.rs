@@ -316,10 +316,15 @@ impl eframe::App for EnfusionToolsApp {
                     if ui.button("Diff Builds").clicked() {
                         if let Some(background_task_sender) = self.internal.task_queue.clone() {
                             execute(async move {
-                                let base_files = rfd::AsyncFileDialog::new().pick_files().await;
+                                let base_files = rfd::AsyncFileDialog::new()
+                                    .set_title("Choose Base Files")
+                                    .pick_files()
+                                    .await;
                                 if let Some(mut base_files) = base_files {
-                                    let modified_files =
-                                        rfd::AsyncFileDialog::new().pick_files().await;
+                                    let modified_files = rfd::AsyncFileDialog::new()
+                                        .set_title("Choose Changed Files")
+                                        .pick_files()
+                                        .await;
                                     if let Some(mut modified_files) = modified_files {
                                         #[cfg(target_arch = "wasm32")]
                                         let _ = background_task_sender.send(
