@@ -4,6 +4,7 @@ use async_std::io::Seek;
 use async_std::io::SeekExt;
 use async_std::io::SeekFrom;
 use egui::Color32;
+use egui::FontId;
 use egui::TextFormat;
 use enfusion_pak::vfs::async_vfs::AsyncVfsPath;
 use similar::ChangeTag;
@@ -154,9 +155,11 @@ pub async fn build_file_diff(
 
     let diff = similar::TextDiff::from_lines(&base_contents_str, &modified_contents_str);
     let mut job = LayoutJob::default();
+
     let mut distance_from_change = 0;
     const CONTEXT_DISTANCE: usize = 5;
     let mut previous_lines: VecDeque<String> = VecDeque::with_capacity(CONTEXT_DISTANCE);
+    let font_id = FontId::monospace(12.0);
     for change in diff.iter_all_changes() {
         let (sign, color) = match change.tag() {
             ChangeTag::Delete => {
@@ -175,20 +178,28 @@ pub async fn build_file_diff(
 
         if distance_from_change < CONTEXT_DISTANCE {
             for line in previous_lines.drain(..) {
-                job.append(&line, 0.0, Default::default());
+                job.append(
+                    &line,
+                    0.0,
+                    TextFormat { font_id: font_id.clone(), ..Default::default() },
+                );
             }
 
             job.append(
                 &format!("{sign}{change}\n"),
                 0.0,
                 if let Some(color) = color {
-                    TextFormat { color, ..Default::default() }
+                    TextFormat { color, font_id: font_id.clone(), ..Default::default() }
                 } else {
                     Default::default()
                 },
             );
         } else if distance_from_change == CONTEXT_DISTANCE + 1 {
-            job.append("[...]\n", 0.0, Default::default());
+            job.append(
+                "[...]\n",
+                0.0,
+                TextFormat { font_id: font_id.clone(), ..Default::default() },
+            );
         } else {
             if previous_lines.len() == CONTEXT_DISTANCE {
                 let _ = previous_lines.pop_front();
