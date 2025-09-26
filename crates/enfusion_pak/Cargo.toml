@@ -2,6 +2,13 @@
 name = "enfusion_pak"
 version = "0.1.0"
 edition = "2024"
+readme = "README.md"
+repository = "https://github.com/landaire/enfusion_tools"
+authors = ["Lander Brandt"]
+documentation = "https://docs.rs/enfusion_pak"
+homepage = "https://landaire.github.io/enfusion_tools"
+license = "MIT OR Apache-2.0"
+keywords = ["arma", "reforger", "enfusion"]
 
 [[bin]]
 name = "enfusion_pak"
