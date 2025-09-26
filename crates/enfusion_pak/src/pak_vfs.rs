@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 use std::io::Cursor;
 use std::ops::Range;
+
 use vfs::FileSystem;
 use vfs::VfsError;
 use vfs::VfsMetadata;
@@ -109,6 +110,7 @@ where
     }
 }
 
+#[cfg(feature = "arc")]
 impl<T> FileSystem for PakVfs<T>
 where
     T: std::ops::Deref + Sync + Send + Debug + 'static,
