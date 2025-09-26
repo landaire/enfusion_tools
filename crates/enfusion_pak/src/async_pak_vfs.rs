@@ -17,11 +17,14 @@ use async_std::io::Write;
 use async_std::stream;
 use async_std::stream::Stream;
 
+/// Trait which allows for requesting a file be asynchronously read into memory.
 #[async_trait]
 pub trait AsyncPrime {
+    /// Request the provided `file_range` be asynchronously primed and returned.
     async fn prime_file(&self, file_range: Range<usize>) -> impl AsRef<[u8]>;
 }
 
+/// Asynchronous VFS implementation for reading a `.pak` file.
 #[async_trait]
 impl<T> AsyncFileSystem for PakVfs<T>
 where

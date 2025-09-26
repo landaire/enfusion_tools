@@ -13,10 +13,13 @@ use crate::FileEntryMeta;
 use crate::PakFile;
 use crate::RcFileEntry;
 
+/// Trait which allows for requesting a file be read into memory.
 pub trait Prime {
+    /// Request the provided `file_range` be primed and returned.
     fn prime_file(&self, file_range: Range<usize>) -> impl AsRef<[u8]>;
 }
 
+/// Synchronous VFS implementation for reading a `.pak` file.
 #[derive(Debug, Clone)]
 pub struct PakVfs<T> {
     pub(crate) source: T,
@@ -29,6 +32,26 @@ where
     T: std::ops::Deref,
     T::Target: AsRef<PakFile>,
 {
+    /// Construct a new `PakVfs` from the provided `source` which can be represented as a `PakFile` reference.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::path::PathBuf;
+    /// use enfusion_pak::PakFile;
+    /// use enfusion_pak::pak_vfs::PakVfs;
+    /// use enfusion_pak::error::PakError;
+    ///
+    /// fn parse_pak_file(path: PathBuf) -> Result<PakFile, PakError> {
+    ///     let file = std::fs::File::open(&path)?;
+    ///     let mmap = unsafe { memmap2::Mmap::map(&file)? };
+    ///
+    ///     PakFile::parse(&mmap)
+    /// }
+    ///
+    /// let parsed_file = parse_pak_file()?;
+    /// let vfs = PakVfs::new(Arc::new(parsed_file));
+    /// ```
     pub fn new(source: T) -> Self {
         // Generate the cache
         let mut entry_cache = HashMap::new();
@@ -66,6 +89,7 @@ where
     T: std::ops::Deref,
     T::Target: AsRef<PakFile>,
 {
+    /// Look up a file entry by its path.
     pub fn entry_at(&self, path: &str) -> vfs::VfsResult<&RcFileEntry> {
         let lookup_key = if path.is_empty() { "/" } else { path };
 

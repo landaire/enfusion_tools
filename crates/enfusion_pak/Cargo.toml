@@ -1,5 +1,6 @@
 [package]
 name = "enfusion_pak"
+description = "A library/cli for reading Enfusion game engine `.pak` files."
 version = "0.1.0"
 edition = "2024"
 readme = "README.md"
@@ -42,4 +43,4 @@ default = ["vfs"]
 arc = []
 async_vfs = ["vfs/async-vfs", "arc", "dep:flate2", "dep:async-std", "dep:async-trait"]
 vfs = ["arc", "dep:vfs", "dep:flate2"]
-bin = ["dep:clap", "dep:color-eyre", "dep:memmap2", "dep:humansize", "dep:async-trait"]
+bin = ["dep:clap", "dep:color-eyre", "dep:memmap2", "dep:humansize", "dep:async-trait", "async_vfs"]

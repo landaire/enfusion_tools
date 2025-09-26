@@ -20,6 +20,7 @@ use winnow::stream::Offset;
 use winnow::stream::Stream as _;
 use winnow::token::take;
 
+/// Represents some type of a file or directory
 #[derive(Debug, Clone)]
 pub struct FileEntry {
     name: String,
@@ -33,14 +34,18 @@ pub type RcFileEntry = std::sync::Arc<FileEntry>;
 pub type RcFileEntry = std::rc::Rc<FileEntry>;
 
 impl FileEntry {
+    /// Entry's name
     pub fn name(&self) -> &str {
         self.name.as_str()
     }
 
+    /// What kind of entry this is
     pub fn kind(&self) -> FileEntryKind {
         self.meta.kind()
     }
 
+    /// Entry metadata. For a directory this will contain its children,
+    /// and for a file this will contain file metadata.
     pub fn meta(&self) -> &FileEntryMeta {
         &self.meta
     }
@@ -110,8 +115,10 @@ impl FileEntry {
     }
 }
 
+/// An entry's metadata containing either its children or file metadata
 #[derive(Debug, Clone, Kinded, Variantly)]
 #[kinded(kind = FileEntryKind)]
+#[non_exhaustive]
 pub enum FileEntryMeta {
     Folder {
         children: Vec<RcFileEntry>,
@@ -136,6 +143,9 @@ impl FileEntryMeta {
         }
     }
 
+    /// Returns this file's timestamp. For directories there is no timestamp information
+    /// and this will return `None`. For Files, this returns the date/time at which the file
+    /// was modified(?). Note: there is no time zone information recorded.
     pub fn parsed_timestamp(&self) -> Option<jiff::civil::DateTime> {
         match self {
             FileEntryMeta::Folder { .. } => None,
@@ -184,34 +194,53 @@ pub struct PakFile {
 }
 
 impl PakFile {
+    /// Returns an immutable slice of the [`Chunk`]s contained in this `PakFile`.
     pub fn chunks(&self) -> &[Chunk] {
         &self.chunks
     }
 
+    /// Returns a mutable `Vec` for this `PakFile`'s chunks.
     pub fn chunks_mut(&mut self) -> &mut Vec<Chunk> {
         &mut self.chunks
     }
 
+    /// Finds and returns an immutable reference to the [`Chunk::File`] chunk contained in this `PakFile`.
+    /// May return `None` if no such chunk exists.
     pub fn file_chunk(&self) -> Option<&Chunk> {
         self.chunks.iter().find(|chunk| chunk.is_file())
     }
 
+    /// Finds and returns a mutable reference to the [`Chunk::File`] chunk contained in this `PakFile`.
+    /// May return `None` if no such chunk exists.
     pub fn file_chunk_mut(&mut self) -> Option<&mut Chunk> {
         self.chunks.iter_mut().find(|chunk| chunk.is_file())
     }
 }
 
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum PakType {
     PAC1,
 }
 
 #[derive(Debug, Kinded, Variantly)]
+#[non_exhaustive]
 pub enum Chunk {
-    Form { file_size: u32, pak_file_type: PakType },
-    Head { version: u32, unknown_data: Range<usize> },
-    Data { data: Range<usize> },
-    File { fs: RcFileEntry },
+    Form {
+        file_size: u32,
+        pak_file_type: PakType,
+    },
+    Head {
+        version: u32,
+        unknown_data: Range<usize>,
+    },
+    /// Contains the
+    Data {
+        data: Range<usize>,
+    },
+    File {
+        fs: RcFileEntry,
+    },
     Unknown(u32),
 }
 

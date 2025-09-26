@@ -16,14 +16,20 @@ use humansize::BINARY;
 use humansize::format_size;
 use memmap2::Mmap;
 
-/// Simple program to greet a person
+/// Parser for Enfusion game engine `.pak` files
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 struct Args {
+    /// Print long file information
     #[arg(long, short)]
     long: bool,
+
+    /// Virtually merge contents of files together so that duplicate directories
+    /// across multiple `.pak` files are treated as a single filesystem entry.
     #[arg(long, short)]
     merged: bool,
+
+    /// Path to either a single file or a directory containing `.pak` files.
     file: PathBuf,
 }
 
@@ -86,7 +92,7 @@ fn parse_pak_files<P: AsRef<Path>>(files: &[P], args: &Args) -> color_eyre::Resu
         {
             parsed_files.remove(i)
         } else {
-            println!("No data files contained a FILE chunk");
+            eprintln!("No data files contained a FILE chunk");
             return Ok(());
         };
 
@@ -177,6 +183,9 @@ fn print_pak_file_chunk_details(fs: &FileEntry, args: &Args) {
                     )
                 }
             }
+            _ => {
+                // we don't care about other chunk kinds
+            }
         }
     }
 }
@@ -200,6 +209,9 @@ fn print_pak_file(pak_file: &PakFile, args: &Args) -> color_eyre::Result<()> {
                 print_pak_file_chunk_details(fs, args);
             }
             Chunk::Unknown(_) => todo!(),
+            _ => {
+                eprintln!("Unhandled chunk kind: {:?}", chunk.kind())
+            }
         }
         println!();
     }
@@ -217,7 +229,6 @@ fn main() -> color_eyre::Result<()> {
 
     let mut pak_files = Vec::new();
     if args.file.is_dir() {
-        println!("it's a dir!");
         for entry in std::fs::read_dir(&args.file)? {
             let entry = entry?;
             let path = entry.path();
