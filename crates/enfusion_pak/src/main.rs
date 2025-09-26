@@ -75,7 +75,7 @@ fn parse_pak_files<P: AsRef<Path>>(files: &[P], args: &Args) -> color_eyre::Resu
                 });
             }
             Err(e) => {
-                eprintln!("Error parsing {:?}: {:?}", file_path, e);
+                eprintln!("Error parsing {file_path:?}: {e:?}");
             }
         }
     }
