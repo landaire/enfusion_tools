@@ -26,8 +26,10 @@ use log::debug;
 use crate::app::KnownPaths;
 use crate::app::TreeNode;
 use crate::diff;
-use crate::pak_wrapper::parse_pak_file;
+// use crate::pak_wrapper::parse_pak_file;
 use crate::vfs_ext::VfsExt;
+
+pub use crate::pak_wrapper::FileReference;
 
 #[derive(Debug)]
 pub struct LoadedFiles {
@@ -242,19 +244,6 @@ pub async fn perform_search(
     }
 }
 
-#[cfg(target_arch = "wasm32")]
-#[repr(transparent)]
-#[derive(Clone, Debug)]
-pub struct FileReference(pub rfd::FileHandle);
-#[cfg(target_arch = "wasm32")]
-unsafe impl Send for FileReference {}
-unsafe impl Sync for FileReference {}
-
-#[cfg(not(target_arch = "wasm32"))]
-#[repr(transparent)]
-#[derive(Clone, Debug)]
-pub struct FileReference(pub std::path::PathBuf);
-
 pub fn start_background_thread(
     inbox: UiInboxSender<BackgroundTaskMessage>,
 ) -> (std::sync::mpsc::Sender<BackgroundTask>, Option<Receiver<BackgroundTask>>) {
@@ -398,7 +387,12 @@ async fn load_pak_files_from_handles(
         #[cfg(target_arch = "wasm32")]
         {
             let cloned = handle.clone();
-            let parsed_file = parse_pak_file(cloned).await;
+            let parsed_file = enfusion_pak::wrappers::async_reader::parse_pak_file(
+                cloned.0.file_name().into(),
+                cloned,
+            )
+            .await
+            .expect("failed to parse pak file");
             let vfs = PakVfs::new(Arc::new(parsed_file));
             parsed_paths.push(VfsPath::new(vfs.clone()));
             parsed_async_paths.push(AsyncVfsPath::new(vfs));
@@ -407,7 +401,7 @@ async fn load_pak_files_from_handles(
         #[cfg(not(target_arch = "wasm32"))]
         {
             let cloned = handle.clone();
-            let parsed_file = parse_pak_file(cloned.0)?;
+            let parsed_file = crate::pak_wrapper::parse_pak_file(cloned.0)?;
             let vfs = PakVfs::new(Arc::new(parsed_file));
             parsed_paths.push(VfsPath::new(vfs.clone()));
             parsed_async_paths.push(AsyncVfsPath::new(vfs));

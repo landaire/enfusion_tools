@@ -29,8 +29,10 @@ vfs = { version = "0.12.1", optional = true }
 flate2 = { version = "1.1.1", optional = true }
 
 # Async
-async-trait = {version = "0.1.88", optional = true }
-async-std = { version = "1.13.1", optional = true }
+async-trait = { workspace = true, optional = true }
+async-std = { workspace = true, optional = true }
+futures = { workspace = true, optional = true }
+oval = { version = "2.0.0", optiona = true }
 
 # Bin
 memmap2 = { version = "0.9.5", optional = true }
@@ -41,6 +43,6 @@ clap = { version = "4.5.37", features = ["derive"], optional = true }
 [features]
 default = ["vfs"]
 arc = []
-async_vfs = ["vfs/async-vfs", "arc", "dep:flate2", "dep:async-std", "dep:async-trait"]
+async_vfs = ["vfs/async-vfs", "arc", "vfs", "dep:futures", "dep:flate2", "dep:async-std", "dep:async-trait"]
 vfs = ["arc", "dep:vfs", "dep:flate2"]
 bin = ["dep:clap", "dep:color-eyre", "dep:memmap2", "dep:humansize", "dep:async-trait", "async_vfs"]

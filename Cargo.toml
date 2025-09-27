@@ -2,6 +2,11 @@
 members = ["crates/*"]
 resolver = "3"
 
+[workspace.dependencies]
+async-trait = "0.1.88"
+async-std = "1.13.1"
+futures = "0.3.31"
+
 [patch.crates-io]
 # egui_ltreeview = { git = "https://github.com/landaire-contrib/egui_ltreeview", branch = "large_node_perf_fix" }
 # egui_ltreeview = { path = "/Users/lander/src/egui_ltreeview" }

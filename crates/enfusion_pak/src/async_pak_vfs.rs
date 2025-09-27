@@ -21,7 +21,13 @@ use async_std::stream::Stream;
 #[async_trait]
 pub trait AsyncPrime {
     /// Request the provided `file_range` be asynchronously primed and returned.
-    async fn prime_file(&self, file_range: Range<usize>) -> impl AsRef<[u8]>;
+    async fn prime_file(&self, file_range: Range<usize>) -> Result<impl AsRef<[u8]>, VfsError>;
+}
+
+#[async_trait]
+pub trait AsyncReadAt {
+    /// Request the provided `file_range` be asynchronously primed and returned.
+    async fn read_at(&self, file_range: Range<usize>) -> Result<impl AsRef<[u8]>, VfsError>;
 }
 
 /// Asynchronous VFS implementation for reading a `.pak` file.
@@ -65,7 +71,7 @@ where
         let data_start = *offset as usize;
         let data_end = data_start + *compressed_len as usize;
 
-        let primed_file = self.source.prime_file(data_start..data_end).await;
+        let primed_file = self.source.prime_file(data_start..data_end).await?;
         let source_slice: &[u8] = primed_file.as_ref();
         let mut source_range = source_slice;
         if *compressed != 0 {

@@ -16,7 +16,11 @@ use crate::RcFileEntry;
 /// Trait which allows for requesting a file be read into memory.
 pub trait Prime {
     /// Request the provided `file_range` be primed and returned.
-    fn prime_file(&self, file_range: Range<usize>) -> impl AsRef<[u8]>;
+    fn prime_file(&self, file_range: Range<usize>) -> Result<impl AsRef<[u8]>, VfsError>;
+}
+
+pub trait ReadAt {
+    fn read_at(&self, file_range: std::ops::Range<usize>) -> Result<impl AsRef<[u8]>, VfsError>;
 }
 
 /// Synchronous VFS implementation for reading a `.pak` file.
@@ -171,7 +175,7 @@ where
         let data_start = *offset as usize;
         let data_end = data_start + *compressed_len as usize;
 
-        let primed_file = self.source.prime_file(data_start..data_end);
+        let primed_file = self.source.prime_file(data_start..data_end)?;
         let source_slice: &[u8] = primed_file.as_ref();
         let mut source_range = source_slice;
         if *compressed != 0 {

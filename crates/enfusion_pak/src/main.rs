@@ -3,18 +3,15 @@ use std::ffi::OsStr;
 use std::path::Path;
 use std::path::PathBuf;
 
-use async_trait::async_trait;
 use clap::Parser;
 use enfusion_pak::Chunk;
 use enfusion_pak::FileEntry;
 use enfusion_pak::FileEntryMeta;
 use enfusion_pak::PakFile;
 use enfusion_pak::RcFileEntry;
-use enfusion_pak::async_pak_vfs::AsyncPrime;
-use enfusion_pak::pak_vfs::Prime;
+use enfusion_pak::wrappers::bytes::BytesPakFileWrapper;
 use humansize::BINARY;
 use humansize::format_size;
-use memmap2::Mmap;
 
 /// Parser for Enfusion game engine `.pak` files
 #[derive(Parser, Debug)]
@@ -37,33 +34,6 @@ pub fn add_num(integers: &mut Vec<u32>) {
     integers.push(0);
 }
 
-#[derive(Debug)]
-#[allow(unused)]
-struct WrappedPakFile {
-    path: PathBuf,
-    source: Mmap,
-    pak_file: PakFile,
-}
-
-impl AsRef<PakFile> for WrappedPakFile {
-    fn as_ref(&self) -> &PakFile {
-        &self.pak_file
-    }
-}
-
-impl Prime for WrappedPakFile {
-    fn prime_file(&self, file_range: std::ops::Range<usize>) -> impl AsRef<[u8]> {
-        &self.source[file_range]
-    }
-}
-
-#[async_trait]
-impl AsyncPrime for WrappedPakFile {
-    async fn prime_file(&self, file_range: std::ops::Range<usize>) -> impl AsRef<[u8]> {
-        &self.source[file_range]
-    }
-}
-
 fn parse_pak_files<P: AsRef<Path>>(files: &[P], args: &Args) -> color_eyre::Result<()> {
     let mut parsed_files = Vec::new();
 
@@ -74,11 +44,11 @@ fn parse_pak_files<P: AsRef<Path>>(files: &[P], args: &Args) -> color_eyre::Resu
 
         match PakFile::parse(&mmap) {
             Ok(pak_file) => {
-                parsed_files.push(WrappedPakFile {
-                    path: file_path.to_path_buf(),
-                    source: mmap,
+                parsed_files.push(BytesPakFileWrapper::new(
+                    file_path.to_path_buf(),
+                    mmap,
                     pak_file,
-                });
+                ));
             }
             Err(e) => {
                 eprintln!("Error parsing {file_path:?}: {e:?}");
@@ -88,7 +58,7 @@ fn parse_pak_files<P: AsRef<Path>>(files: &[P], args: &Args) -> color_eyre::Resu
 
     if args.merged {
         let mut merged_file = if let Some(i) =
-            parsed_files.iter().rev().position(|file| file.pak_file.file_chunk().is_some())
+            parsed_files.iter().rev().position(|file| file.pak_file().file_chunk().is_some())
         {
             parsed_files.remove(i)
         } else {
@@ -96,13 +66,14 @@ fn parse_pak_files<P: AsRef<Path>>(files: &[P], args: &Args) -> color_eyre::Resu
             return Ok(());
         };
 
-        let Chunk::File { fs: merged_fs } = merged_file.pak_file.file_chunk_mut().expect("??")
+        let Chunk::File { fs: merged_fs } =
+            merged_file.pak_file_mut().file_chunk_mut().expect("??")
         else {
             unreachable!()
         };
 
         for other in parsed_files {
-            let Some(Chunk::File { fs: other_fs }) = other.pak_file.file_chunk() else {
+            let Some(Chunk::File { fs: other_fs }) = other.pak_file().file_chunk() else {
                 continue;
             };
 
@@ -124,7 +95,7 @@ fn parse_pak_files<P: AsRef<Path>>(files: &[P], args: &Args) -> color_eyre::Resu
                     .expect("failed to convert pak file path to str")
             );
 
-            print_pak_file(&pak.pak_file, args)?;
+            print_pak_file(pak.pak_file(), args)?;
         }
     }
 
