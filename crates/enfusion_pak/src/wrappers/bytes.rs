@@ -7,6 +7,7 @@ use async_trait::async_trait;
 use vfs::VfsError;
 
 use crate::PakFile;
+#[cfg(feature = "async_vfs")]
 use crate::async_pak_vfs::AsyncPrime;
 use crate::pak_vfs::Prime;
 
@@ -77,6 +78,7 @@ where
     }
 }
 
+#[cfg(feature = "async_vfs")]
 #[async_trait]
 impl<T> AsyncPrime for BytesPakFileWrapper<T>
 where

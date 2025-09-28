@@ -13,4 +13,5 @@ mod parser;
 #[cfg(any(feature = "vfs", feature = "async_vfs"))]
 pub use vfs;
 pub use winnow;
+#[cfg(feature = "vfs")]
 pub mod wrappers;
