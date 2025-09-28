@@ -1,7 +1,7 @@
 [package]
 name = "enfusion_pak"
 description = "A library/cli for reading Enfusion game engine `.pak` files."
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 readme = "README.md"
 repository = "https://github.com/landaire/enfusion_tools"
