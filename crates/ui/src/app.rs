@@ -313,8 +313,8 @@ impl eframe::App for EnfusionToolsApp {
                             });
                         }
                     }
-                    if ui.button("Diff Builds").clicked() {
-                        if let Some(background_task_sender) = self.internal.task_queue.clone() {
+                    if ui.button("Diff Builds").clicked()
+                        && let Some(background_task_sender) = self.internal.task_queue.clone() {
                             execute(async move {
                                 let base_files = rfd::AsyncFileDialog::new()
                                     .set_title("Choose Base Files")
@@ -361,7 +361,6 @@ impl eframe::App for EnfusionToolsApp {
                                 }
                             });
                         }
-                    }
                     ui.label("Search");
                     let response = ui.text_edit_singleline(&mut self.search_query);
 
@@ -369,8 +368,8 @@ impl eframe::App for EnfusionToolsApp {
                         && response.ctx.input(|input| input.key_pressed(egui::Key::Enter))
                     {
                         debug!("Search requested");
-                        if let Some(task_queue) = &self.internal.task_queue {
-                            if let Some(vfs_root) = self.internal.async_overlay_fs.clone() {
+                        if let Some(task_queue) = &self.internal.task_queue
+                            && let Some(vfs_root) = self.internal.async_overlay_fs.clone() {
                                 debug!("Sending earch task");
                                 self.internal.opened_file_text.clear();
                                 let search_id = self.internal.next_search_query_id;
@@ -392,7 +391,6 @@ impl eframe::App for EnfusionToolsApp {
                                     }),
                                 );
                             }
-                        }
                     }
                 });
 
