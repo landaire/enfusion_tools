@@ -2,11 +2,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use enfusion_pak::PakFile;
-use enfusion_pak::async_pak_vfs::AsyncPrime;
 use enfusion_pak::async_pak_vfs::AsyncReadAt;
 use enfusion_pak::error::PakError;
-use enfusion_pak::pak_vfs::Prime;
 use enfusion_pak::pak_vfs::ReadAt;
 use enfusion_pak::vfs::VfsError;
 use enfusion_pak::wrappers::bytes::BytesPakFileWrapper;
