@@ -89,15 +89,16 @@ impl ToolsTabViewer<'_> {
                 .show_header(ui, |ui| {
                     ui.label(file_result.file.as_str());
                     if ui.button("Open").clicked()
-                        && let Some(overlay_fs) = self.app_internal_data.overlay_fs.as_ref() {
-                            let _ = self.app_internal_data.inbox.sender().send(
-                                crate::task::BackgroundTaskMessage::RequestOpenFile(
-                                    overlay_fs
-                                        .join(file_result.file.as_str())
-                                        .expect("failed to map async file to sync file"),
-                                ),
-                            );
-                        }
+                        && let Some(overlay_fs) = self.app_internal_data.overlay_fs.as_ref()
+                    {
+                        let _ = self.app_internal_data.inbox.sender().send(
+                            crate::task::BackgroundTaskMessage::RequestOpenFile(
+                                overlay_fs
+                                    .join(file_result.file.as_str())
+                                    .expect("failed to map async file to sync file"),
+                            ),
+                        );
+                    }
                 })
                 .body(|ui| {
                     for (num, (LineNumber(line_num), file_match)) in

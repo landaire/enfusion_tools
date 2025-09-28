@@ -314,53 +314,49 @@ impl eframe::App for EnfusionToolsApp {
                         }
                     }
                     if ui.button("Diff Builds").clicked()
-                        && let Some(background_task_sender) = self.internal.task_queue.clone() {
-                            execute(async move {
-                                let base_files = rfd::AsyncFileDialog::new()
-                                    .set_title("Choose Base Files")
+                        && let Some(background_task_sender) = self.internal.task_queue.clone()
+                    {
+                        execute(async move {
+                            let base_files = rfd::AsyncFileDialog::new()
+                                .set_title("Choose Base Files")
+                                .pick_files()
+                                .await;
+                            if let Some(mut base_files) = base_files {
+                                let modified_files = rfd::AsyncFileDialog::new()
+                                    .set_title("Choose Changed Files")
                                     .pick_files()
                                     .await;
-                                if let Some(mut base_files) = base_files {
-                                    let modified_files = rfd::AsyncFileDialog::new()
-                                        .set_title("Choose Changed Files")
-                                        .pick_files()
-                                        .await;
-                                    if let Some(mut modified_files) = modified_files {
-                                        #[cfg(target_arch = "wasm32")]
-                                        let _ = background_task_sender.send(
-                                            BackgroundTask::DiffBuilds {
-                                                base: base_files
-                                                    .drain(..)
-                                                    .map(FileReference)
-                                                    .collect(),
-                                                modified: modified_files
-                                                    .drain(..)
-                                                    .map(FileReference)
-                                                    .collect(),
-                                            },
-                                        );
+                                if let Some(mut modified_files) = modified_files {
+                                    #[cfg(target_arch = "wasm32")]
+                                    let _ =
+                                        background_task_sender.send(BackgroundTask::DiffBuilds {
+                                            base: base_files.drain(..).map(FileReference).collect(),
+                                            modified: modified_files
+                                                .drain(..)
+                                                .map(FileReference)
+                                                .collect(),
+                                        });
 
-                                        #[cfg(not(target_arch = "wasm32"))]
-                                        let _ = background_task_sender.send(
-                                            BackgroundTask::DiffBuilds {
-                                                base: base_files
-                                                    .drain(..)
-                                                    .map(|handle| {
-                                                        FileReference(handle.path().to_owned())
-                                                    })
-                                                    .collect(),
-                                                modified: modified_files
-                                                    .drain(..)
-                                                    .map(|handle| {
-                                                        FileReference(handle.path().to_owned())
-                                                    })
-                                                    .collect(),
-                                            },
-                                        );
-                                    }
+                                    #[cfg(not(target_arch = "wasm32"))]
+                                    let _ =
+                                        background_task_sender.send(BackgroundTask::DiffBuilds {
+                                            base: base_files
+                                                .drain(..)
+                                                .map(|handle| {
+                                                    FileReference(handle.path().to_owned())
+                                                })
+                                                .collect(),
+                                            modified: modified_files
+                                                .drain(..)
+                                                .map(|handle| {
+                                                    FileReference(handle.path().to_owned())
+                                                })
+                                                .collect(),
+                                        });
                                 }
-                            });
-                        }
+                            }
+                        });
+                    }
                     ui.label("Search");
                     let response = ui.text_edit_singleline(&mut self.search_query);
 
@@ -369,28 +365,29 @@ impl eframe::App for EnfusionToolsApp {
                     {
                         debug!("Search requested");
                         if let Some(task_queue) = &self.internal.task_queue
-                            && let Some(vfs_root) = self.internal.async_overlay_fs.clone() {
-                                debug!("Sending earch task");
-                                self.internal.opened_file_text.clear();
-                                let search_id = self.internal.next_search_query_id;
-                                self.internal.next_search_query_id.0 += 1;
+                            && let Some(vfs_root) = self.internal.async_overlay_fs.clone()
+                        {
+                            debug!("Sending earch task");
+                            self.internal.opened_file_text.clear();
+                            let search_id = self.internal.next_search_query_id;
+                            self.internal.next_search_query_id.0 += 1;
 
-                                let _ = task_queue.send(BackgroundTask::PerformSearch(
-                                    search_id,
-                                    vfs_root,
-                                    self.search_query.clone(),
-                                ));
+                            let _ = task_queue.send(BackgroundTask::PerformSearch(
+                                search_id,
+                                vfs_root,
+                                self.search_query.clone(),
+                            ));
 
-                                let query = self.search_query.clone();
-                                self.dock_state.main_surface_mut().push_to_first_leaf(
-                                    TabKind::SearchResults(SearchData {
-                                        tab_title: format!("{query} - Search Results"),
-                                        query: self.search_query.clone(),
-                                        id: search_id,
-                                        results: Default::default(),
-                                    }),
-                                );
-                            }
+                            let query = self.search_query.clone();
+                            self.dock_state.main_surface_mut().push_to_first_leaf(
+                                TabKind::SearchResults(SearchData {
+                                    tab_title: format!("{query} - Search Results"),
+                                    query: self.search_query.clone(),
+                                    id: search_id,
+                                    results: Default::default(),
+                                }),
+                            );
+                        }
                     }
                 });
 

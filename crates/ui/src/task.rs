@@ -496,9 +496,10 @@ fn build_file_tree(
             let haystack = if query_has_path { full_path.as_str() } else { file_name.as_str() };
 
             if let Some(query) = filter.as_ref()
-                && ascii_icontains(query, haystack) {
-                    filtered_files.push(vfs_path.clone());
-                }
+                && ascii_icontains(query, haystack)
+            {
+                filtered_files.push(vfs_path.clone());
+            }
         }
 
         if filter.is_some() { Some(filtered_files) } else { None }

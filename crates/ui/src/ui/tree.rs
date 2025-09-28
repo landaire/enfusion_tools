@@ -42,13 +42,14 @@ impl EnfusionToolsApp {
                         self.internal.filtered_tree = None;
                     } else if self.internal.file_filter.len() >= 2
                         && let Some(overlay_fs) = self.internal.overlay_fs.clone()
-                            && let Some(task_queue) = self.internal.task_queue.as_ref() {
-                                let _ = task_queue.send(crate::task::BackgroundTask::FilterPaths(
-                                    Arc::clone(&self.internal.known_file_paths),
-                                    overlay_fs,
-                                    self.internal.file_filter.clone(),
-                                ));
-                            }
+                        && let Some(task_queue) = self.internal.task_queue.as_ref()
+                    {
+                        let _ = task_queue.send(crate::task::BackgroundTask::FilterPaths(
+                            Arc::clone(&self.internal.known_file_paths),
+                            overlay_fs,
+                            self.internal.file_filter.clone(),
+                        ));
+                    }
                 }
                 if self.internal.overlay_fs.is_some() {
                     // let mut open_state_changed = false;
