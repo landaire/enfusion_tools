@@ -241,7 +241,21 @@ impl EnfusionToolsApp {
                 }
             }
             BackgroundTaskMessage::FileDataLoaded(file, items) => {
-                // Try reading this as text
+                // Try decompiling rapified config.bin files
+                if cfg_parser::is_rapified(&items)
+                    && let Ok(rap) = cfg_parser::RapFile::parse(&items)
+                {
+                    let decompiled = cfg_parser::decompile(&rap);
+                    let surface = self.dock_state.main_surface_mut();
+                    surface.push_to_first_leaf(TabKind::Editor(EditorData {
+                        title: format!("{} - Decompiled", file.filename()),
+                        opened_file: file,
+                        contents: decompiled,
+                    }));
+                    return;
+                }
+
+                // Try reading as text
                 let Ok(str_data) = String::from_utf8(items) else {
                     return;
                 };

@@ -2,7 +2,8 @@
 name = "cfg_parser"
 version = "0.1.0"
 edition = "2024"
+description = "Parser for Bohemia Interactive rapified config.bin files"
 
 [dependencies]
-ariadne = "0.5.1"
-chumsky = "0.10.1"
+byteorder = "1"
+thiserror = "2.0.12"

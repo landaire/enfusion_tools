@@ -120,8 +120,8 @@ pub async fn perform_search(
                     // If this file doesn't have an extension that we believe to be a text
                     // file, let's ignore it
                     if let Some(
-                        "c" | "et" | "conf" | "layout" | "agr" | "asi" | "ast" | "asy" | "aw"
-                        | "emat" | "hpp" | "json" | "txt" | "xml",
+                        "bin" | "c" | "et" | "conf" | "layout" | "agr" | "asi" | "ast" | "asy"
+                        | "aw" | "emat" | "hpp" | "json" | "txt" | "xml",
                     ) = child.extension().as_deref()
                     {
                         file_queue.push_back(child);
@@ -144,8 +144,17 @@ pub async fn perform_search(
             continue;
         }
 
-        let Some(file_data) = String::from_utf8(data).ok() else {
-            continue;
+        // For rapified config.bin files, decompile to text before searching
+        let file_data = if cfg_parser::is_rapified(&data) {
+            match cfg_parser::RapFile::parse(&data) {
+                Ok(rap) => cfg_parser::decompile(&rap),
+                Err(_) => continue,
+            }
+        } else {
+            let Some(text) = String::from_utf8(data).ok() else {
+                continue;
+            };
+            text
         };
 
         let matches = regex.find_iter(&file_data);
