@@ -44,6 +44,7 @@ pub enum RapValue {
     String(String),
     Float(f32),
     Int(i32),
+    Array(Vec<RapValue>),
 }
 
 /// Read a null-terminated ASCII string from a cursor.
@@ -77,6 +78,16 @@ fn read_typed_value(cursor: &mut Cursor<&[u8]>, subtype: u8) -> Result<RapValue,
         0 => Ok(RapValue::String(read_asciiz(cursor)?)),
         1 => Ok(RapValue::Float(cursor.read_f32::<LittleEndian>()?)),
         2 => Ok(RapValue::Int(cursor.read_i32::<LittleEndian>()?)),
+        3 => {
+            let count = read_compressed_int(cursor)?;
+            let mut elements = Vec::with_capacity(count as usize);
+            for _ in 0..count {
+                let elem_type = cursor.read_u8()?;
+                elements.push(read_typed_value(cursor, elem_type)?);
+            }
+            Ok(RapValue::Array(elements))
+        }
+        4 => Ok(RapValue::String(read_asciiz(cursor)?)),
         _ => Err(RapError::UnknownValueSubtype(subtype, cursor.position())),
     }
 }
@@ -185,6 +196,10 @@ fn format_value(v: &RapValue) -> String {
         RapValue::String(s) => format!("\"{s}\""),
         RapValue::Float(f) => format!("{f}"),
         RapValue::Int(i) => format!("{i}"),
+        RapValue::Array(elements) => {
+            let vals: Vec<String> = elements.iter().map(format_value).collect();
+            format!("{{{}}}", vals.join(", "))
+        }
     }
 }
 

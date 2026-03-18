@@ -19,3 +19,4 @@ enfusion_pak = { path = "../enfusion_pak", features = ["vfs", "arc"] }
 memmap2 = "0.9"
 regex = "1"
 vfs = "0.12.1"
+cfg_parser = { path = "../cfg_parser" }

@@ -484,8 +484,24 @@ fn cmd_cat(root: &VfsPath, path: &str) {
         }
     };
 
+    let mut data = Vec::new();
+    reader.read_to_end(&mut data).expect("failed to read file");
+
+    if cfg_parser::is_rapified(&data) {
+        match cfg_parser::RapFile::parse(&data) {
+            Ok(rap) => {
+                let decompiled = cfg_parser::decompile(&rap);
+                print!("{decompiled}");
+                return;
+            }
+            Err(e) => {
+                eprintln!("Warning: rapified config parse failed: {e}");
+            }
+        }
+    }
+
     let mut stdout = std::io::stdout().lock();
-    std::io::copy(&mut reader, &mut stdout).expect("failed to write to stdout");
+    std::io::Write::write_all(&mut stdout, &data).expect("failed to write to stdout");
 }
 
 fn cmd_info(paths: &[PathBuf]) {
