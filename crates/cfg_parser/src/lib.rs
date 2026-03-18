@@ -33,9 +33,17 @@ pub struct RapClass {
 
 #[derive(Debug, Clone)]
 pub enum RapEntry {
+    /// `class Name : Parent { ... }` — entry type 0.
     Class { name: String, body: RapClass },
+    /// `name = value;` — entry type 1.
     Property { name: String, value: RapValue },
-    Array { name: String, elements: Vec<RapValue> },
+    /// `name[] = {...}` (entry type 2) or `name[] += {...}` when `append` is set
+    /// (entry type 5).
+    Array { name: String, elements: Vec<RapValue>, append: bool },
+    /// `class Name;` — entry type 3. A forward declaration of a class defined
+    /// elsewhere, used so subclasses can inherit from it. This is not a deletion.
+    ExternClass(String),
+    /// `delete Name;` — entry type 4.
     Delete(String),
 }
 
@@ -119,8 +127,16 @@ fn read_class_body(full_data: &[u8], offset: u64) -> Result<RapClass, RapError> 
                 let value = read_typed_value(&mut cursor, subtype)?;
                 entries.push(RapEntry::Property { name, value });
             }
-            2 => {
-                // Array: name + compressed count + typed elements
+            2 | 5 => {
+                // Array: name + compressed count + typed elements.
+                //
+                // Type 5 is the `+=` (append) form and carries an extra u32 flag
+                // between the tag and the name; the payload after it is identical
+                // to type 2.
+                let append = entry_type == 5;
+                if append {
+                    let _flag = cursor.read_u32::<LittleEndian>()?;
+                }
                 let name = read_asciiz(&mut cursor)?;
                 let count = read_compressed_int(&mut cursor)?;
                 let mut elements = Vec::with_capacity(count as usize);
@@ -128,10 +144,15 @@ fn read_class_body(full_data: &[u8], offset: u64) -> Result<RapClass, RapError> 
                     let elem_type = cursor.read_u8()?;
                     elements.push(read_typed_value(&mut cursor, elem_type)?);
                 }
-                entries.push(RapEntry::Array { name, elements });
+                entries.push(RapEntry::Array { name, elements, append });
             }
             3 => {
-                // Delete marker
+                // Forward declaration of an external class: `class Name;`
+                let name = read_asciiz(&mut cursor)?;
+                entries.push(RapEntry::ExternClass(name));
+            }
+            4 => {
+                // Delete marker: `delete Name;`
                 let name = read_asciiz(&mut cursor)?;
                 entries.push(RapEntry::Delete(name));
             }
@@ -180,9 +201,13 @@ fn write_class_entries(out: &mut String, entries: &[RapEntry], indent: usize) {
             RapEntry::Property { name, value } => {
                 let _ = writeln!(out, "{prefix}{name} = {};", format_value(value));
             }
-            RapEntry::Array { name, elements } => {
+            RapEntry::Array { name, elements, append } => {
+                let op = if *append { "+=" } else { "=" };
                 let vals: Vec<String> = elements.iter().map(format_value).collect();
-                let _ = writeln!(out, "{prefix}{name}[] = {{{}}};", vals.join(", "));
+                let _ = writeln!(out, "{prefix}{name}[] {op} {{{}}};", vals.join(", "));
+            }
+            RapEntry::ExternClass(name) => {
+                let _ = writeln!(out, "{prefix}class {name};");
             }
             RapEntry::Delete(name) => {
                 let _ = writeln!(out, "{prefix}delete {name};");
@@ -212,10 +237,112 @@ pub fn is_rapified(data: &[u8]) -> bool {
 mod tests {
     use super::*;
 
+    /// Build a minimal rapified blob whose root class body contains `entries`.
+    fn rap_blob(entries: &[&[u8]]) -> Vec<u8> {
+        let mut v = Vec::new();
+        v.extend_from_slice(b"\x00raP");
+        v.extend_from_slice(&0u32.to_le_bytes()); // version
+        v.extend_from_slice(&0u32.to_le_bytes()); // always
+        v.extend_from_slice(&0u32.to_le_bytes()); // enum offset
+        debug_assert_eq!(v.len(), 16);
+        v.push(0); // root parent: ""
+        v.push(entries.len() as u8); // compressed entry count
+        for e in entries {
+            v.extend_from_slice(e);
+        }
+        v
+    }
+
+    fn asciiz(s: &str) -> Vec<u8> {
+        let mut v = s.as_bytes().to_vec();
+        v.push(0);
+        v
+    }
+
+    fn decompile_bytes(data: &[u8]) -> String {
+        decompile(&RapFile::parse(data).expect("parse should succeed"))
+    }
+
     #[test]
     fn detect_magic() {
         assert!(is_rapified(b"\x00raP\x00\x00\x00\x00"));
         assert!(!is_rapified(b"not a config"));
         assert!(!is_rapified(b"\x00ra"));
+    }
+
+    /// Entry type 5 is an array-append (`name[] += {...}`).
+    ///
+    /// Layout: tag(5) | u32 flag | asciiz name | compressed count | typed elements.
+    /// Observed in JMC_EG/Data/config.bin @0x5b0b and
+    /// Survivalists_Weapons_JMC/attachments/lights/config.bin @0xfc.
+    #[test]
+    fn parses_array_append_entry() {
+        let mut entry = vec![5u8];
+        entry.extend_from_slice(&1u32.to_le_bytes());
+        entry.extend_from_slice(&asciiz("inventorySlot"));
+        entry.push(3); // element count
+        for s in ["RISLeft", "RISRight", "RISBottom"] {
+            entry.push(0); // element subtype: string
+            entry.extend_from_slice(&asciiz(s));
+        }
+
+        let out = decompile_bytes(&rap_blob(&[&entry]));
+        assert_eq!(out, "inventorySlot[] += {\"RISLeft\", \"RISRight\", \"RISBottom\"};\n");
+    }
+
+    /// A plain array (type 2) must still render with `=`, not `+=`.
+    #[test]
+    fn plain_array_does_not_append() {
+        let mut entry = vec![2u8];
+        entry.extend_from_slice(&asciiz("magazines"));
+        entry.push(1);
+        entry.push(0);
+        entry.extend_from_slice(&asciiz("Mag_STANAG_30Rnd"));
+
+        let out = decompile_bytes(&rap_blob(&[&entry]));
+        assert_eq!(out, "magazines[] = {\"Mag_STANAG_30Rnd\"};\n");
+    }
+
+    /// Entry type 3 is a forward declaration of an external class (`class X;`),
+    /// NOT a deletion. DayZ configs open with blocks of these so subclasses can
+    /// inherit from vanilla base classes.
+    #[test]
+    fn parses_extern_class_declaration() {
+        let mut entry = vec![3u8];
+        entry.extend_from_slice(&asciiz("HouseNoDestruct"));
+
+        let out = decompile_bytes(&rap_blob(&[&entry]));
+        assert_eq!(out, "class HouseNoDestruct;\n");
+    }
+
+    /// Entry type 4 is the actual delete marker (`delete X;`).
+    #[test]
+    fn parses_delete_entry() {
+        let mut entry = vec![4u8];
+        entry.extend_from_slice(&asciiz("Mode_Safe"));
+
+        let out = decompile_bytes(&rap_blob(&[&entry]));
+        assert_eq!(out, "delete Mode_Safe;\n");
+    }
+
+    /// Entry types 3, 4 and 5 must coexist with classes and properties in one body.
+    #[test]
+    fn parses_mixed_entry_types() {
+        let mut extern_entry = vec![3u8];
+        extern_entry.extend_from_slice(&asciiz("Base"));
+
+        let mut prop = vec![1u8, 2u8]; // property, subtype int
+        prop.extend_from_slice(&asciiz("scope"));
+        prop.extend_from_slice(&2i32.to_le_bytes());
+
+        let mut append = vec![5u8];
+        append.extend_from_slice(&1u32.to_le_bytes());
+        append.extend_from_slice(&asciiz("attachments"));
+        append.push(1);
+        append.push(0);
+        append.extend_from_slice(&asciiz("Slot"));
+
+        let out = decompile_bytes(&rap_blob(&[&extern_entry, &prop, &append]));
+        assert_eq!(out, "class Base;\nscope = 2;\nattachments[] += {\"Slot\"};\n");
     }
 }
