@@ -15,10 +15,7 @@ pub struct FileReference(pub std::path::PathBuf);
 
 impl FileReference {
     pub fn has_supported_extension(&self) -> bool {
-        matches!(
-            self.0.extension().and_then(|e| e.to_str()),
-            Some("pak" | "pbo")
-        )
+        matches!(self.0.extension().and_then(|e| e.to_str()), Some("pak" | "pbo"))
     }
 }
 
@@ -65,17 +62,17 @@ pub enum ParsedArchive {
 }
 
 pub fn parse_archive_file(path: PathBuf) -> Result<ParsedArchive, PakError> {
-    let ext = path
-        .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or("")
-        .to_ascii_lowercase();
+    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
 
     match ext.as_str() {
         "pbo" => {
             let data = std::fs::read(&path).map_err(PakError::IoError)?;
-            let pbo = dayz_pbo::PboFile::parse(&data)
-                .map_err(|e| PakError::IoError(std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string())))?;
+            let pbo = dayz_pbo::PboFile::parse(&data).map_err(|e| {
+                PakError::IoError(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    e.to_string(),
+                ))
+            })?;
             let vfs = dayz_pbo::pbo_vfs::PboVfs::new(data, pbo);
             Ok(ParsedArchive::Pbo(vfs))
         }

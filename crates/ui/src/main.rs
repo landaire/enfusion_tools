@@ -5,10 +5,9 @@
 #[cfg(not(target_arch = "wasm32"))]
 fn main() -> eframe::Result {
     tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("ui=debug,dayz_pbo=debug,enfusion_pak=debug")),
-        )
+        .with_env_filter(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(
+            |_| tracing_subscriber::EnvFilter::new("ui=debug,dayz_pbo=debug,enfusion_pak=debug"),
+        ))
         .init();
 
     let native_options = eframe::NativeOptions {

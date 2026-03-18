@@ -52,17 +52,11 @@ where
     /// multiple PBOs with different prefixes can be overlaid into a single
     /// coherent directory hierarchy that mirrors the game's virtual filesystem.
     pub fn new(source: T, pbo: PboFile) -> Self {
-        let prefix = pbo
-            .extensions
-            .get("prefix")
-            .map(|p| p.replace('\\', "/"))
-            .unwrap_or_default();
+        let prefix = pbo.extensions.get("prefix").map(|p| p.replace('\\', "/")).unwrap_or_default();
 
         let entries = Self::build_entries(&pbo, &prefix);
 
-        Self {
-            inner: Arc::new(PboVfsInner { source, pbo, entries }),
-        }
+        Self { inner: Arc::new(PboVfsInner { source, pbo, entries }) }
     }
 
     /// Return the parsed PBO metadata.
@@ -74,20 +68,14 @@ where
         let mut entries: HashMap<String, VfsEntry> = HashMap::new();
 
         // Seed the root directory.
-        entries.insert(
-            String::new(),
-            VfsEntry::Directory { children: Vec::new() },
-        );
+        entries.insert(String::new(), VfsEntry::Directory { children: Vec::new() });
 
         // Create intermediate directories for the prefix itself (e.g. "DZ" then "DZ/AI").
         if !prefix.is_empty() {
             let prefix_parts: Vec<&str> = prefix.split('/').collect();
             for depth in 0..prefix_parts.len() {
-                let parent_path = if depth == 0 {
-                    String::new()
-                } else {
-                    prefix_parts[..depth].join("/")
-                };
+                let parent_path =
+                    if depth == 0 { String::new() } else { prefix_parts[..depth].join("/") };
                 let child_name = prefix_parts[depth];
                 let child_path = if parent_path.is_empty() {
                     child_name.to_string()
@@ -98,10 +86,10 @@ where
                 let parent = entries
                     .entry(parent_path)
                     .or_insert_with(|| VfsEntry::Directory { children: Vec::new() });
-                if let VfsEntry::Directory { children } = parent {
-                    if !children.contains(&child_name.to_string()) {
-                        children.push(child_name.to_string());
-                    }
+                if let VfsEntry::Directory { children } = parent
+                    && !children.contains(&child_name.to_string())
+                {
+                    children.push(child_name.to_string());
                 }
 
                 entries
@@ -115,26 +103,16 @@ where
             let relative = header.filename.replace('\\', "/");
 
             // Prepend the prefix to get the full VFS path.
-            let full_path = if prefix.is_empty() {
-                relative
-            } else {
-                format!("{prefix}/{relative}")
-            };
+            let full_path =
+                if prefix.is_empty() { relative } else { format!("{prefix}/{relative}") };
 
             // Register the file leaf.
-            entries.insert(
-                full_path.clone(),
-                VfsEntry::File { entry_index: idx },
-            );
+            entries.insert(full_path.clone(), VfsEntry::File { entry_index: idx });
 
             // Ensure every ancestor directory exists and lists its children.
             let parts: Vec<&str> = full_path.split('/').collect();
             for depth in 0..parts.len() {
-                let parent_path = if depth == 0 {
-                    String::new()
-                } else {
-                    parts[..depth].join("/")
-                };
+                let parent_path = if depth == 0 { String::new() } else { parts[..depth].join("/") };
                 let child_name = parts[depth];
                 let child_path = if parent_path.is_empty() {
                     child_name.to_string()
@@ -146,10 +124,10 @@ where
                     .entry(parent_path)
                     .or_insert_with(|| VfsEntry::Directory { children: Vec::new() });
 
-                if let VfsEntry::Directory { children } = parent {
-                    if !children.contains(&child_name.to_string()) {
-                        children.push(child_name.to_string());
-                    }
+                if let VfsEntry::Directory { children } = parent
+                    && !children.contains(&child_name.to_string())
+                {
+                    children.push(child_name.to_string());
                 }
 
                 if depth < parts.len() - 1 {
@@ -170,10 +148,7 @@ where
 {
     fn lookup(&self, path: &str) -> vfs::VfsResult<&VfsEntry> {
         let key = path.strip_prefix('/').unwrap_or(path);
-        self.inner
-            .entries
-            .get(key)
-            .ok_or_else(|| VfsError::from(VfsErrorKind::FileNotFound))
+        self.inner.entries.get(key).ok_or_else(|| VfsError::from(VfsErrorKind::FileNotFound))
     }
 
     fn read_file_data(&self, entry_index: usize) -> Vec<u8> {
@@ -189,9 +164,7 @@ where
     fn read_dir(&self, path: &str) -> vfs::VfsResult<Box<dyn Iterator<Item = String> + Send>> {
         let entry = self.lookup(path)?;
         match entry {
-            VfsEntry::Directory { children } => {
-                Ok(Box::new(children.clone().into_iter()))
-            }
+            VfsEntry::Directory { children } => Ok(Box::new(children.clone().into_iter())),
             VfsEntry::File { .. } => Err(VfsError::from(VfsErrorKind::NotSupported)),
         }
     }

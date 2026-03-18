@@ -87,9 +87,7 @@ fn vfs_nested_directory_under_prefix() {
     let root = VfsPath::new(vfs);
 
     // Navigate to DZ/anims/workspaces/infected/infected_main/Combat.agr
-    let combat = root
-        .join("DZ/anims/workspaces/infected/infected_main/Combat.agr")
-        .unwrap();
+    let combat = root.join("DZ/anims/workspaces/infected/infected_main/Combat.agr").unwrap();
     assert!(combat.exists().unwrap());
     assert!(combat.is_file().unwrap());
 }
@@ -120,10 +118,7 @@ fn vfs_walk_all_files_with_prefix() {
         }
     }
 
-    assert_eq!(
-        file_count, entry_count,
-        "VFS file count should match PBO entry count"
-    );
+    assert_eq!(file_count, entry_count, "VFS file count should match PBO entry count");
 }
 
 #[test]
@@ -146,11 +141,7 @@ fn vfs_multiple_pbos_share_prefix_root() {
     use vfs::MemoryFS;
     use vfs::OverlayFS;
 
-    let paths = vec![
-        VfsPath::new(MemoryFS::new()),
-        VfsPath::new(vfs1),
-        VfsPath::new(vfs2),
-    ];
+    let paths = vec![VfsPath::new(MemoryFS::new()), VfsPath::new(vfs1), VfsPath::new(vfs2)];
     let overlay = VfsPath::new(OverlayFS::new(&paths));
 
     // Both should be reachable through the overlay

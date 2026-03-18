@@ -126,9 +126,15 @@ enum PboParserState {
     ParsingExtensions,
     /// All headers parsed; we know how large the data section is and need to
     /// skip over it.
-    SkippingData { data_start: usize, data_len: usize },
+    SkippingData {
+        data_start: usize,
+        data_len: usize,
+    },
     /// Expecting the trailing checksum.
-    ParsingChecksum { data_start: usize, data_len: usize },
+    ParsingChecksum {
+        data_start: usize,
+        data_len: usize,
+    },
     Done,
 }
 
@@ -199,8 +205,7 @@ impl PboParser {
                     self.state = PboParserState::ParsingExtensions;
                 } else if entry.filename.is_empty() {
                     debug!("Found terminator entry at offset {:#X}", self.bytes_parsed);
-                    let data_len: usize =
-                        self.entries.iter().map(|e| e.data_size as usize).sum();
+                    let data_len: usize = self.entries.iter().map(|e| e.data_size as usize).sum();
                     let data_start = self.bytes_parsed;
                     self.state = PboParserState::SkippingData { data_start, data_len };
                 } else {
@@ -330,56 +335,33 @@ impl PboFile {
 fn parse_nul_string(input: &mut Stream) -> WResult<String> {
     let bytes = take_while(0.., |b| b != 0u8).parse_next(input)?;
     let _ = winnow::binary::u8(input)?; // consume the NUL
-    let s = String::from_utf8(bytes.to_vec())
-        .expect("PBO filename/extension is not valid UTF-8");
+    let s = String::from_utf8(bytes.to_vec()).expect("PBO filename/extension is not valid UTF-8");
     Ok(s)
 }
 
 fn parse_header_entry(input: &mut Stream) -> WResult<HeaderEntry> {
-    let filename = parse_nul_string
-        .context(StrContext::Label("filename"))
-        .parse_next(input)?;
+    let filename = parse_nul_string.context(StrContext::Label("filename")).parse_next(input)?;
 
-    let packing_method_raw = le_u32
-        .context(StrContext::Label("packing_method"))
-        .parse_next(input)?;
+    let packing_method_raw =
+        le_u32.context(StrContext::Label("packing_method")).parse_next(input)?;
     let packing_method = PackingMethod::from_u32(packing_method_raw);
 
-    let original_size = le_u32
-        .context(StrContext::Label("original_size"))
-        .parse_next(input)?;
-    let reserved = le_u32
-        .context(StrContext::Label("reserved"))
-        .parse_next(input)?;
-    let timestamp = le_u32
-        .context(StrContext::Label("timestamp"))
-        .parse_next(input)?;
-    let data_size = le_u32
-        .context(StrContext::Label("data_size"))
-        .parse_next(input)?;
+    let original_size = le_u32.context(StrContext::Label("original_size")).parse_next(input)?;
+    let reserved = le_u32.context(StrContext::Label("reserved")).parse_next(input)?;
+    let timestamp = le_u32.context(StrContext::Label("timestamp")).parse_next(input)?;
+    let data_size = le_u32.context(StrContext::Label("data_size")).parse_next(input)?;
 
-    Ok(HeaderEntry {
-        filename,
-        packing_method,
-        original_size,
-        reserved,
-        timestamp,
-        data_size,
-    })
+    Ok(HeaderEntry { filename, packing_method, original_size, reserved, timestamp, data_size })
 }
 
 /// Parse a single key-value extension pair (two NUL-terminated strings).
 /// When the key is empty the extensions section is over.
 fn parse_extension_pair(input: &mut Stream) -> WResult<(String, String)> {
-    let key = parse_nul_string
-        .context(StrContext::Label("extension key"))
-        .parse_next(input)?;
+    let key = parse_nul_string.context(StrContext::Label("extension key")).parse_next(input)?;
     if key.is_empty() {
         return Ok((String::new(), String::new()));
     }
-    let value = parse_nul_string
-        .context(StrContext::Label("extension value"))
-        .parse_next(input)?;
+    let value = parse_nul_string.context(StrContext::Label("extension value")).parse_next(input)?;
     Ok((key, value))
 }
 
@@ -391,13 +373,11 @@ fn parse_checksum(input: &mut Stream) -> WResult<Option<[u8; 20]>> {
         return Ok(None);
     }
 
-    let _nul = winnow::binary::u8
-        .context(StrContext::Label("checksum separator"))
-        .parse_next(input)?;
+    let _nul =
+        winnow::binary::u8.context(StrContext::Label("checksum separator")).parse_next(input)?;
 
-    let hash_bytes: &[u8] = take(20usize)
-        .context(StrContext::Label("sha1 checksum"))
-        .parse_next(input)?;
+    let hash_bytes: &[u8] =
+        take(20usize).context(StrContext::Label("sha1 checksum")).parse_next(input)?;
 
     let mut hash = [0u8; 20];
     hash.copy_from_slice(hash_bytes);

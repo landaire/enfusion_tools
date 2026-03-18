@@ -21,7 +21,10 @@ use enfusion_pak::vfs::async_vfs::AsyncOverlayFS;
 use enfusion_pak::vfs::async_vfs::AsyncVfsPath;
 use futures::StreamExt;
 use itertools::Itertools;
-use tracing::{debug, error, warn, info};
+use tracing::debug;
+use tracing::error;
+use tracing::info;
+use tracing::warn;
 
 use crate::app::KnownPaths;
 use crate::app::TreeNode;
@@ -115,9 +118,11 @@ pub async fn perform_search(
                 if child.is_file().await.ok().unwrap_or_default() {
                     // If this file doesn't have an extension that we believe to be a text
                     // file, let's ignore it
-                    if let Some("c" | "et" | "conf" | "layout"
-                        | "agr" | "asi" | "ast" | "asy" | "aw"
-                        | "emat" | "hpp" | "json" | "txt" | "xml") = child.extension().as_deref() {
+                    if let Some(
+                        "c" | "et" | "conf" | "layout" | "agr" | "asi" | "ast" | "asy" | "aw"
+                        | "emat" | "hpp" | "json" | "txt" | "xml",
+                    ) = child.extension().as_deref()
+                    {
                         file_queue.push_back(child);
                     }
                 } else {
@@ -337,7 +342,8 @@ pub fn process_background_requests(
             BackgroundTask::FilterPaths { known_paths, file_path_set, root, query } => {
                 let inbox = inbox.clone();
                 execute(async move {
-                    let new_tree = build_file_tree(&root, &known_paths, &file_path_set, Some(query));
+                    let new_tree =
+                        build_file_tree(&root, &known_paths, &file_path_set, Some(query));
 
                     let _ = inbox.send(BackgroundTaskMessage::FilesFiltered(new_tree));
                 });
@@ -438,10 +444,7 @@ async fn load_pak_files_from_handles(
         }
     }
 
-    info!(
-        vfs_count = parsed_paths.len() - 1,
-        "building overlay filesystem"
-    );
+    info!(vfs_count = parsed_paths.len() - 1, "building overlay filesystem");
     let overlay_fs = VfsPath::new(OverlayFS::new(&parsed_paths));
     let async_overlay_fs = AsyncVfsPath::new(AsyncOverlayFS::new(&parsed_async_paths));
 

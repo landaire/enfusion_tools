@@ -9,7 +9,8 @@ use egui_dock::Style;
 use egui_ltreeview::TreeViewState;
 use enfusion_pak::vfs::VfsPath;
 use enfusion_pak::vfs::async_vfs::AsyncVfsPath;
-use tracing::{debug, error};
+use tracing::debug;
+use tracing::error;
 
 use crate::task::BackgroundTask;
 use crate::task::BackgroundTaskMessage;
