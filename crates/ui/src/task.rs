@@ -448,25 +448,34 @@ async fn load_pak_files_from_handles(
     let overlay_fs = VfsPath::new(OverlayFS::new(&parsed_paths));
     let async_overlay_fs = AsyncVfsPath::new(AsyncOverlayFS::new(&parsed_async_paths));
 
+    // Crawl each individual VFS layer instead of the overlay.
+    // OverlayFS::read_dir is O(layers) per directory — with 100+ layers this
+    // dominates load time. Individual layers have O(1) read_dir (HashMap lookup).
     let mut known_paths = HashMap::new();
     let mut file_path_set = HashSet::new();
-    let mut queue = vec![overlay_fs.clone()];
 
-    while let Some(next) = queue.pop() {
-        if next != overlay_fs {
+    for layer in &parsed_paths[1..] {
+        let mut queue = vec![layer.clone()];
+        while let Some(next) = queue.pop() {
             let full_path = next.as_str().to_string();
             let name = next.filename();
 
-            known_paths.insert((FullPath(full_path), FileName(name)), next.clone());
-        }
+            // Use the overlay_fs path for the value so file access goes through
+            // the overlay (which handles deduplication correctly).
+            if let Ok(overlay_path) = overlay_fs.join(&full_path) {
+                known_paths.entry((FullPath(full_path), FileName(name))).or_insert(overlay_path);
+            }
 
-        let Ok(reader) = next.read_dir() else {
-            // Not a directory → it's a file
-            file_path_set.insert(next.as_str().to_string());
-            continue;
-        };
-        for child in reader {
-            queue.push(child);
+            match next.read_dir() {
+                Ok(reader) => {
+                    for child in reader {
+                        queue.push(child);
+                    }
+                }
+                Err(_) => {
+                    file_path_set.insert(next.as_str().to_string());
+                }
+            }
         }
     }
 

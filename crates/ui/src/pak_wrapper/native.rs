@@ -58,7 +58,7 @@ pub fn parse_pak_file(path: PathBuf) -> Result<BytesPakFileWrapper<MmapWrapper>,
 /// mounted as a VFS.
 pub enum ParsedArchive {
     Pak(Arc<BytesPakFileWrapper<MmapWrapper>>),
-    Pbo(dayz_pbo::pbo_vfs::PboVfs<Vec<u8>>),
+    Pbo(dayz_pbo::pbo_vfs::PboVfs<MmapWrapper>),
 }
 
 pub fn parse_archive_file(path: PathBuf) -> Result<ParsedArchive, PakError> {
@@ -66,14 +66,15 @@ pub fn parse_archive_file(path: PathBuf) -> Result<ParsedArchive, PakError> {
 
     match ext.as_str() {
         "pbo" => {
-            let data = std::fs::read(&path).map_err(PakError::IoError)?;
-            let pbo = dayz_pbo::PboFile::parse(&data).map_err(|e| {
+            let file = std::fs::File::open(&path)?;
+            let mmap = unsafe { memmap2::Mmap::map(&file)? };
+            let pbo = dayz_pbo::PboFile::parse(&mmap).map_err(|e| {
                 PakError::IoError(std::io::Error::new(
                     std::io::ErrorKind::InvalidData,
                     e.to_string(),
                 ))
             })?;
-            let vfs = dayz_pbo::pbo_vfs::PboVfs::new(data, pbo);
+            let vfs = dayz_pbo::pbo_vfs::PboVfs::new(MmapWrapper(Arc::new(mmap)), pbo);
             Ok(ParsedArchive::Pbo(vfs))
         }
         _ => {

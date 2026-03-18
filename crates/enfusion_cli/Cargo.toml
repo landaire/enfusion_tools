@@ -1,0 +1,21 @@
+[package]
+name = "enfusion_cli"
+description = "CLI for browsing and searching Enfusion PAK and DayZ PBO archives."
+version = "0.1.0"
+edition = "2024"
+repository = "https://github.com/landaire/enfusion_tools"
+authors = ["Lander Brandt"]
+license = "MIT OR Apache-2.0"
+
+[[bin]]
+name = "enfusion"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+globset = "0.4"
+dayz_pbo = { path = "../dayz_pbo", features = ["vfs"] }
+enfusion_pak = { path = "../enfusion_pak", features = ["vfs", "arc"] }
+memmap2 = "0.9"
+regex = "1"
+vfs = "0.12.1"

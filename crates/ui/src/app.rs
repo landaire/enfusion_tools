@@ -165,11 +165,30 @@ impl EnfusionToolsApp {
                             .collect();
                     }
 
-                    self.internal.known_file_paths = Arc::new(loaded_files.known_paths);
-                    self.internal.file_path_set = Arc::new(loaded_files.file_path_set);
+                    // Swap in the new state, collecting the old values for
+                    // background dropping so we don't block the UI thread
+                    // deallocating large mmap-backed buffers and hash maps.
+                    let old_known = std::mem::replace(
+                        &mut self.internal.known_file_paths,
+                        Arc::new(loaded_files.known_paths),
+                    );
+                    let old_file_set = std::mem::replace(
+                        &mut self.internal.file_path_set,
+                        Arc::new(loaded_files.file_path_set),
+                    );
+                    let old_overlay = self.internal.overlay_fs.replace(loaded_files.overlay_fs);
+                    let old_async_overlay =
+                        self.internal.async_overlay_fs.replace(loaded_files.async_overlay_fs);
+                    let old_tree = std::mem::take(&mut self.internal.tree);
 
-                    self.internal.overlay_fs = Some(loaded_files.overlay_fs);
-                    self.internal.async_overlay_fs = Some(loaded_files.async_overlay_fs);
+                    #[cfg(not(target_arch = "wasm32"))]
+                    std::thread::spawn(move || {
+                        drop(old_known);
+                        drop(old_file_set);
+                        drop(old_overlay);
+                        drop(old_async_overlay);
+                        drop(old_tree);
+                    });
 
                     self.internal.tree = file_tree;
                     self.internal.dir_count = self
