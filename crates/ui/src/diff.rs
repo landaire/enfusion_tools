@@ -1,12 +1,12 @@
-use async_std::io::Read;
-use async_std::io::ReadExt;
-use async_std::io::Seek;
-use async_std::io::SeekExt;
-use async_std::io::SeekFrom;
 use egui::Color32;
 use egui::FontId;
 use egui::TextFormat;
 use enfusion_pak::vfs::async_vfs::AsyncVfsPath;
+use futures::io::AsyncRead;
+use futures::io::AsyncReadExt;
+use futures::io::AsyncSeek;
+use futures::io::AsyncSeekExt;
+use futures::io::SeekFrom;
 use similar::ChangeTag;
 use std::collections::VecDeque;
 use std::sync::Arc;
@@ -105,10 +105,10 @@ pub async fn diff_builds(base: LoadedFiles, mut modified: LoadedFiles) -> Vec<Di
 }
 
 #[allow(unused)]
-async fn streams_equal<R1: Read + Seek + Unpin, R2: Read + Seek + Unpin>(
+async fn streams_equal<R1: AsyncRead + AsyncSeek + Unpin, R2: AsyncRead + AsyncSeek + Unpin>(
     mut a: R1,
     mut b: R2,
-) -> async_std::io::Result<bool> {
+) -> std::io::Result<bool> {
     a.seek(SeekFrom::Start(0)).await?;
     b.seek(SeekFrom::Start(0)).await?;
 

@@ -136,8 +136,8 @@ where
 #[cfg(feature = "async_vfs")]
 mod async_impl {
     use super::*;
-    use async_std::io::Cursor as AsyncCursor;
     use async_trait::async_trait;
+    use futures::io::Cursor as AsyncCursor;
     use vfs::VfsResult;
     use vfs::async_vfs::AsyncFileSystem;
 
@@ -181,14 +181,14 @@ mod async_impl {
         async fn create_file(
             &self,
             _path: &str,
-        ) -> VfsResult<Box<dyn async_std::io::Write + Send + Unpin>> {
+        ) -> VfsResult<Box<dyn futures::io::AsyncWrite + Send + Unpin>> {
             Err(VfsErrorKind::NotSupported.into())
         }
 
         async fn append_file(
             &self,
             _path: &str,
-        ) -> VfsResult<Box<dyn async_std::io::Write + Send + Unpin>> {
+        ) -> VfsResult<Box<dyn futures::io::AsyncWrite + Send + Unpin>> {
             Err(VfsErrorKind::NotSupported.into())
         }
 

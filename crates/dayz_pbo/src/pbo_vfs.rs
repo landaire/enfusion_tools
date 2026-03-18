@@ -139,7 +139,7 @@ const _: () = {
     struct AsyncSliceReader<T>(ArcSliceReader<T>);
     impl<T> Unpin for AsyncSliceReader<T> {}
 
-    impl<T: AsRef<[u8]>> async_std::io::Read for AsyncSliceReader<T> {
+    impl<T: AsRef<[u8]>> futures::io::AsyncRead for AsyncSliceReader<T> {
         fn poll_read(
             mut self: std::pin::Pin<&mut Self>,
             _cx: &mut std::task::Context<'_>,
@@ -149,7 +149,7 @@ const _: () = {
         }
     }
 
-    impl<T: AsRef<[u8]>> async_std::io::Seek for AsyncSliceReader<T> {
+    impl<T: AsRef<[u8]>> futures::io::AsyncSeek for AsyncSliceReader<T> {
         fn poll_seek(
             mut self: std::pin::Pin<&mut Self>,
             _cx: &mut std::task::Context<'_>,
@@ -258,13 +258,13 @@ const _: () = {
         async fn create_file(
             &self,
             path: &str,
-        ) -> VfsResult<Box<dyn async_std::io::Write + Send + Unpin>> {
+        ) -> VfsResult<Box<dyn futures::io::AsyncWrite + Send + Unpin>> {
             self.0.create_file(path).await
         }
         async fn append_file(
             &self,
             path: &str,
-        ) -> VfsResult<Box<dyn async_std::io::Write + Send + Unpin>> {
+        ) -> VfsResult<Box<dyn futures::io::AsyncWrite + Send + Unpin>> {
             self.0.append_file(path).await
         }
         async fn metadata(&self, path: &str) -> VfsResult<VfsMetadata> {

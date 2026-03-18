@@ -137,8 +137,7 @@ pub async fn perform_search(
         // Handle files
         let mut data = Vec::with_capacity(next.metadata().await.expect("no metadata").len as usize);
         if let Err(e) =
-            async_std::io::copy(&mut next.open_file().await.expect("could not open"), &mut data)
-                .await
+            futures::io::copy(&mut next.open_file().await.expect("could not open"), &mut data).await
         {
             error!(file = next.as_str(), ?e, "failed to read file data");
             continue;
@@ -392,7 +391,7 @@ pub async fn read_file_data(path: AsyncVfsPath) -> Option<Vec<u8>> {
     let mut file_data = Vec::with_capacity(metadata.len as usize);
     debug!("got the reader");
 
-    async_std::io::copy(&mut reader, &mut file_data).await.expect("failed to copy data");
+    futures::io::copy(&mut reader, &mut file_data).await.expect("failed to copy data");
 
     Some(file_data)
 }

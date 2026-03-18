@@ -41,14 +41,10 @@ mod native {
             .expect("failed to create parent dir");
 
         let mut reader = path.open_file().await.expect("failed to get file reader");
+        let mut data = Vec::new();
+        futures::io::copy(&mut reader, &mut data).await.expect("failed to read file data");
 
-        // we are real lazy and this is the only thing async_std is used for
-        let mut writer =
-            async_std::fs::File::create(out_path).await.expect("failed to create output file");
-
-        async_std::io::copy(&mut reader, &mut writer)
-            .await
-            .expect("failed to write data to output");
+        tokio::fs::write(out_path, &data).await.expect("failed to write data to output");
     }
 
     /// Dump a file from packed data

@@ -11,9 +11,9 @@ use vfs::error::VfsErrorKind;
 use crate::PakFile;
 use crate::pak_vfs::PakVfs;
 
-use async_std::io::Cursor;
-use async_std::io::Write;
-use async_std::stream::Stream;
+use futures::io::AsyncWrite;
+use futures::io::Cursor;
+use futures::stream::Stream;
 
 /// Trait which allows for requesting a file be asynchronously read into memory.
 #[async_trait]
@@ -75,11 +75,11 @@ where
         }
     }
 
-    async fn create_file(&self, _path: &str) -> VfsResult<Box<dyn Write + Send + Unpin>> {
+    async fn create_file(&self, _path: &str) -> VfsResult<Box<dyn AsyncWrite + Send + Unpin>> {
         Err(VfsErrorKind::NotSupported.into())
     }
 
-    async fn append_file(&self, _path: &str) -> VfsResult<Box<dyn Write + Send + Unpin>> {
+    async fn append_file(&self, _path: &str) -> VfsResult<Box<dyn AsyncWrite + Send + Unpin>> {
         Err(VfsErrorKind::NotSupported.into())
     }
 
