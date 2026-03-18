@@ -14,13 +14,15 @@ winnow = "0.7.7"
 log = "0.4.27"
 
 # vfs
+fskit = { workspace = true, optional = true, features = ["vfs"] }
 vfs = { version = "0.12.1", optional = true }
 async-trait = { version = "0.1.88", optional = true }
 async-std = { version = "1.13.1", optional = true }
+futures = { workspace = true, optional = true }
 
 [dev-dependencies]
 
 [features]
 default = ["vfs"]
-vfs = ["dep:vfs"]
-async_vfs = ["vfs", "vfs/async-vfs", "dep:async-trait", "dep:async-std"]
+vfs = ["dep:vfs", "dep:fskit"]
+async_vfs = ["vfs", "vfs/async-vfs", "fskit/async-vfs", "dep:async-trait", "dep:async-std", "dep:futures"]

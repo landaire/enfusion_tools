@@ -9,5 +9,7 @@ pub mod pbo_vfs;
 #[cfg(feature = "async_vfs")]
 pub mod wrappers;
 #[cfg(feature = "vfs")]
+pub use fskit;
+#[cfg(feature = "vfs")]
 pub use vfs;
 pub use winnow;

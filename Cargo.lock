@@ -1010,6 +1010,8 @@ version = "0.1.0"
 dependencies = [
  "async-std",
  "async-trait",
+ "fskit",
+ "futures",
  "log",
  "thiserror 2.0.12",
  "vfs",
@@ -1310,6 +1312,7 @@ dependencies = [
  "clap",
  "color-eyre",
  "flate2",
+ "fskit",
  "futures",
  "humansize",
  "jiff",
@@ -1523,6 +1526,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e13624c2627564efccf4934284bdd98cbaa14e79b0b5a141218e507b3a823456"
 dependencies = [
  "percent-encoding",
+]
+
+[[package]]
+name = "fskit"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "889b3d163dc47ac9a01b0909a0d04bf09b9fb23a0adc0800d423dc78b53b68c4"
+dependencies = [
+ "async-std",
+ "async-trait",
+ "futures",
+ "vfs",
 ]
 
 [[package]]
@@ -3772,8 +3787,9 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "vfs"
-version = "0.12.1"
-source = "git+https://github.com/landaire/rust-vfs.git?branch=fix%2Fwasm#c4341e8e7c16a019c1a1415fc8a413bf883a08d5"
+version = "0.12.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9e723b9e1c02a3cf9f9d0de6a4ddb8cdc1df859078902fe0ae0589d615711ae6"
 dependencies = [
  "async-recursion",
  "async-std",
@@ -4884,3 +4900,8 @@ dependencies = [
  "syn 2.0.101",
  "winnow",
 ]
+
+[[patch.unused]]
+name = "vfs"
+version = "0.13.0"
+source = "git+https://github.com/landaire/rust-vfs.git?branch=push-pkquslyvkqot#e773e961827b4fcc4681c311f1aba3615e3cd2a2"

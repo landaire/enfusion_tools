@@ -1,161 +1,199 @@
-use std::collections::HashMap;
 use std::fmt::Debug;
-use std::io::Cursor;
+use std::io::Read;
+use std::io::Seek;
+use std::io::SeekFrom;
+use std::ops::Range;
 use std::sync::Arc;
 
-use vfs::VfsError;
+use fskit::Metadata;
+use fskit::ReadOnlyVfs;
+use fskit::VfsTree;
+use fskit::VfsTreeBuilder;
 use vfs::VfsMetadata;
-use vfs::error::VfsErrorKind;
+use vfs::VfsResult;
 
 use crate::PboFile;
 
-/// A VFS entry in the synthetic directory tree.
+/// File metadata stored in the VFS tree for each PBO entry.
 #[derive(Debug, Clone)]
-pub(crate) enum VfsEntry {
-    Directory {
-        children: Vec<String>,
-    },
-    File {
-        /// Index into `PboFile::entries`.
-        entry_index: usize,
-    },
+pub struct PboFileMeta {
+    /// Index into `PboFile::entries`.
+    pub entry_index: usize,
+    /// Uncompressed file size.
+    pub len: u64,
 }
 
-/// Shared inner data for a PBO VFS.
-#[derive(Debug)]
-struct PboVfsInner<T> {
-    source: T,
-    pbo: PboFile,
-    entries: HashMap<String, VfsEntry>,
+impl Metadata for PboFileMeta {
+    fn len(&self) -> u64 {
+        self.len
+    }
 }
+
+/// Build a [`VfsTree`] from a parsed PBO header.
+///
+/// If `prefix` is non-empty (e.g. `"DZ/AI"`), all file paths are rooted
+/// under that prefix so multiple PBOs can be overlaid into one coherent tree.
+pub fn build_tree(pbo: &PboFile, prefix: &str) -> VfsTree<PboFileMeta> {
+    let mut builder = VfsTreeBuilder::new();
+
+    if !prefix.is_empty() {
+        builder = builder.insert_dir(prefix, None);
+    }
+
+    for (idx, header) in pbo.entries.iter().enumerate() {
+        let relative = header.filename.replace('\\', "/");
+        let full_path = if prefix.is_empty() { relative } else { format!("{prefix}/{relative}") };
+
+        let len = if header.original_size > 0 {
+            header.original_size as u64
+        } else {
+            header.data_size as u64
+        };
+
+        builder = builder.insert(full_path, PboFileMeta { entry_index: idx, len });
+    }
+
+    builder.build()
+}
+
+// ---------------------------------------------------------------------------
+// Zero-copy reader
+// ---------------------------------------------------------------------------
+
+/// Zero-copy reader over a subslice of an `Arc`-backed buffer.
+/// Holds a cheap `Arc` clone instead of copying file data into a `Vec`.
+struct ArcSliceReader<T> {
+    source: Arc<T>,
+    range: Range<usize>,
+    pos: usize,
+}
+
+impl<T: AsRef<[u8]>> ArcSliceReader<T> {
+    fn remaining(&self) -> &[u8] {
+        let all: &[u8] = (*self.source).as_ref();
+        let slice = &all[self.range.clone()];
+        &slice[self.pos..]
+    }
+}
+
+impl<T: AsRef<[u8]>> Read for ArcSliceReader<T> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let remaining = self.remaining();
+        let n = std::cmp::min(buf.len(), remaining.len());
+        buf[..n].copy_from_slice(&remaining[..n]);
+        self.pos += n;
+        Ok(n)
+    }
+}
+
+impl<T: AsRef<[u8]>> Seek for ArcSliceReader<T> {
+    fn seek(&mut self, pos: SeekFrom) -> std::io::Result<u64> {
+        let len = self.range.len() as i64;
+        let new_pos = match pos {
+            SeekFrom::Start(n) => n as i64,
+            SeekFrom::End(n) => len + n,
+            SeekFrom::Current(n) => self.pos as i64 + n,
+        };
+        if new_pos < 0 {
+            return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "seek before start"));
+        }
+        self.pos = new_pos as usize;
+        Ok(self.pos as u64)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Opener
+// ---------------------------------------------------------------------------
+
+/// Opener that reads PBO file data via zero-copy `ArcSliceReader`.
+#[derive(Debug, Clone)]
+pub struct PboOpener<T> {
+    source: Arc<T>,
+    pbo: PboFile,
+}
+
+impl<T> PboOpener<T> {
+    fn data_range(&self, meta: &PboFileMeta) -> Range<usize> {
+        self.pbo.entry_data_range_by_index(meta.entry_index)
+    }
+
+    fn make_reader(&self, meta: &PboFileMeta) -> ArcSliceReader<T> {
+        ArcSliceReader { source: Arc::clone(&self.source), range: self.data_range(meta), pos: 0 }
+    }
+}
+
+impl<T> fskit::FileOpener<PboFileMeta> for PboOpener<T>
+where
+    T: AsRef<[u8]> + Debug + Send + Sync + 'static,
+{
+    fn open(&self, meta: &PboFileMeta) -> vfs::VfsResult<Box<dyn vfs::SeekAndRead + Send>> {
+        Ok(Box::new(self.make_reader(meta)))
+    }
+}
+
+#[cfg(feature = "async_vfs")]
+const _: () = {
+    /// Async adapter over `ArcSliceReader`. No real async I/O since data is
+    /// already in memory.
+    struct AsyncSliceReader<T>(ArcSliceReader<T>);
+    impl<T> Unpin for AsyncSliceReader<T> {}
+
+    impl<T: AsRef<[u8]>> async_std::io::Read for AsyncSliceReader<T> {
+        fn poll_read(
+            mut self: std::pin::Pin<&mut Self>,
+            _cx: &mut std::task::Context<'_>,
+            buf: &mut [u8],
+        ) -> std::task::Poll<std::io::Result<usize>> {
+            std::task::Poll::Ready(Read::read(&mut self.0, buf))
+        }
+    }
+
+    impl<T: AsRef<[u8]>> async_std::io::Seek for AsyncSliceReader<T> {
+        fn poll_seek(
+            mut self: std::pin::Pin<&mut Self>,
+            _cx: &mut std::task::Context<'_>,
+            pos: SeekFrom,
+        ) -> std::task::Poll<std::io::Result<u64>> {
+            std::task::Poll::Ready(Seek::seek(&mut self.0, pos))
+        }
+    }
+
+    impl<T> fskit::AsyncFileOpener<PboFileMeta> for PboOpener<T>
+    where
+        T: AsRef<[u8]> + Debug + Send + Sync + 'static,
+    {
+        fn open_async(
+            &self,
+            meta: &PboFileMeta,
+        ) -> vfs::VfsResult<Box<dyn vfs::async_vfs::SeekAndRead + Send + Unpin>> {
+            Ok(Box::new(AsyncSliceReader(self.make_reader(meta))))
+        }
+    }
+};
+
+// ---------------------------------------------------------------------------
+// PboVfs
+// ---------------------------------------------------------------------------
 
 /// A virtual filesystem backed by a PBO archive.
 ///
 /// `T` is the backing store (e.g. `memmap2::Mmap`, `Vec<u8>`) that provides
-/// the raw PBO bytes.  The parsed [`PboFile`] carries the header/offset
-/// information needed to locate individual file data.
+/// the raw PBO bytes.
 ///
 /// Cloning is cheap (Arc refcount bump).
 #[derive(Debug, Clone)]
-pub struct PboVfs<T> {
-    inner: Arc<PboVfsInner<T>>,
-}
+pub struct PboVfs<T>(ReadOnlyVfs<PboFileMeta, PboOpener<T>>);
 
 impl<T> PboVfs<T>
 where
-    T: AsRef<[u8]>,
+    T: AsRef<[u8]> + Debug + Send + Sync + 'static,
 {
-    /// Build a new `PboVfs` from raw bytes and a parsed PBO header.
-    ///
-    /// If the PBO contains a `prefix` header extension (e.g. `DZ\AI`), all
-    /// file paths are rooted under that prefix in the VFS tree.  This means
-    /// multiple PBOs with different prefixes can be overlaid into a single
-    /// coherent directory hierarchy that mirrors the game's virtual filesystem.
     pub fn new(source: T, pbo: PboFile) -> Self {
         let prefix = pbo.extensions.get("prefix").map(|p| p.replace('\\', "/")).unwrap_or_default();
-
-        let entries = build_entries(&pbo, &prefix);
-
-        Self { inner: Arc::new(PboVfsInner { source, pbo, entries }) }
-    }
-
-    /// Return the parsed PBO metadata.
-    pub fn pbo(&self) -> &PboFile {
-        &self.inner.pbo
-    }
-}
-
-/// Build the VFS entry map from a parsed PBO header.
-///
-/// If `prefix` is non-empty, all file paths are rooted under that prefix.
-pub(crate) fn build_entries(pbo: &PboFile, prefix: &str) -> HashMap<String, VfsEntry> {
-    let mut entries: HashMap<String, VfsEntry> = HashMap::new();
-
-    // Seed the root directory.
-    entries.insert(String::new(), VfsEntry::Directory { children: Vec::new() });
-
-    // Create intermediate directories for the prefix itself (e.g. "DZ" then "DZ/AI").
-    if !prefix.is_empty() {
-        let prefix_parts: Vec<&str> = prefix.split('/').collect();
-        for depth in 0..prefix_parts.len() {
-            let parent_path =
-                if depth == 0 { String::new() } else { prefix_parts[..depth].join("/") };
-            let child_name = prefix_parts[depth];
-            let child_path = if parent_path.is_empty() {
-                child_name.to_string()
-            } else {
-                format!("{parent_path}/{child_name}")
-            };
-
-            let parent = entries
-                .entry(parent_path)
-                .or_insert_with(|| VfsEntry::Directory { children: Vec::new() });
-            if let VfsEntry::Directory { children } = parent
-                && !children.contains(&child_name.to_string())
-            {
-                children.push(child_name.to_string());
-            }
-
-            entries
-                .entry(child_path)
-                .or_insert_with(|| VfsEntry::Directory { children: Vec::new() });
-        }
-    }
-
-    for (idx, header) in pbo.entries.iter().enumerate() {
-        // PBO paths use backslashes; normalise to forward slashes for VFS.
-        let relative = header.filename.replace('\\', "/");
-
-        // Prepend the prefix to get the full VFS path.
-        let full_path = if prefix.is_empty() { relative } else { format!("{prefix}/{relative}") };
-
-        // Register the file leaf.
-        entries.insert(full_path.clone(), VfsEntry::File { entry_index: idx });
-
-        // Ensure every ancestor directory exists and lists its children.
-        let parts: Vec<&str> = full_path.split('/').collect();
-        for depth in 0..parts.len() {
-            let parent_path = if depth == 0 { String::new() } else { parts[..depth].join("/") };
-            let child_name = parts[depth];
-            let child_path = if parent_path.is_empty() {
-                child_name.to_string()
-            } else {
-                format!("{parent_path}/{child_name}")
-            };
-
-            let parent = entries
-                .entry(parent_path)
-                .or_insert_with(|| VfsEntry::Directory { children: Vec::new() });
-
-            if let VfsEntry::Directory { children } = parent
-                && !children.contains(&child_name.to_string())
-            {
-                children.push(child_name.to_string());
-            }
-
-            if depth < parts.len() - 1 {
-                entries
-                    .entry(child_path)
-                    .or_insert_with(|| VfsEntry::Directory { children: Vec::new() });
-            }
-        }
-    }
-
-    entries
-}
-
-impl<T> PboVfs<T>
-where
-    T: AsRef<[u8]>,
-{
-    fn lookup(&self, path: &str) -> vfs::VfsResult<&VfsEntry> {
-        let key = path.strip_prefix('/').unwrap_or(path);
-        self.inner.entries.get(key).ok_or_else(|| VfsError::from(VfsErrorKind::FileNotFound))
-    }
-
-    fn read_file_data(&self, entry_index: usize) -> Vec<u8> {
-        let range = self.inner.pbo.entry_data_range_by_index(entry_index);
-        self.inner.source.as_ref()[range].to_vec()
+        let tree = build_tree(&pbo, &prefix);
+        let opener = PboOpener { source: Arc::new(source), pbo };
+        Self(ReadOnlyVfs::new(tree, opener))
     }
 }
 
@@ -163,117 +201,39 @@ impl<T> vfs::FileSystem for PboVfs<T>
 where
     T: AsRef<[u8]> + Debug + Send + Sync + 'static,
 {
-    fn read_dir(&self, path: &str) -> vfs::VfsResult<Box<dyn Iterator<Item = String> + Send>> {
-        let entry = self.lookup(path)?;
-        match entry {
-            VfsEntry::Directory { children } => Ok(Box::new(children.clone().into_iter())),
-            VfsEntry::File { .. } => Err(VfsError::from(VfsErrorKind::NotSupported)),
-        }
+    fn read_dir(&self, path: &str) -> VfsResult<Box<dyn Iterator<Item = String> + Send>> {
+        self.0.read_dir(path)
     }
-
-    fn create_dir(&self, _path: &str) -> vfs::VfsResult<()> {
-        Err(VfsErrorKind::NotSupported.into())
+    fn create_dir(&self, path: &str) -> VfsResult<()> {
+        self.0.create_dir(path)
     }
-
-    fn open_file(&self, path: &str) -> vfs::VfsResult<Box<dyn vfs::SeekAndRead + Send>> {
-        let entry = self.lookup(path)?;
-        match entry {
-            VfsEntry::File { entry_index } => {
-                let data = self.read_file_data(*entry_index);
-                Ok(Box::new(Cursor::new(data)))
-            }
-            VfsEntry::Directory { .. } => Err(VfsError::from(VfsErrorKind::NotSupported)),
-        }
+    fn open_file(&self, path: &str) -> VfsResult<Box<dyn vfs::SeekAndRead + Send>> {
+        self.0.open_file(path)
     }
-
-    fn create_file(&self, _path: &str) -> vfs::VfsResult<Box<dyn vfs::SeekAndWrite + Send>> {
-        Err(VfsErrorKind::NotSupported.into())
+    fn create_file(&self, path: &str) -> VfsResult<Box<dyn vfs::SeekAndWrite + Send>> {
+        self.0.create_file(path)
     }
-
-    fn append_file(&self, _path: &str) -> vfs::VfsResult<Box<dyn vfs::SeekAndWrite + Send>> {
-        Err(VfsErrorKind::NotSupported.into())
+    fn append_file(&self, path: &str) -> VfsResult<Box<dyn vfs::SeekAndWrite + Send>> {
+        self.0.append_file(path)
     }
-
-    fn metadata(&self, path: &str) -> vfs::VfsResult<VfsMetadata> {
-        let entry = self.lookup(path)?;
-        match entry {
-            VfsEntry::Directory { .. } => Ok(VfsMetadata {
-                file_type: vfs::VfsFileType::Directory,
-                len: 0,
-                created: None,
-                modified: None,
-                accessed: None,
-            }),
-            VfsEntry::File { entry_index } => {
-                let header = &self.inner.pbo.entries[*entry_index];
-                let len = if header.original_size > 0 {
-                    header.original_size as u64
-                } else {
-                    header.data_size as u64
-                };
-                Ok(VfsMetadata {
-                    file_type: vfs::VfsFileType::File,
-                    len,
-                    created: None,
-                    modified: None,
-                    accessed: None,
-                })
-            }
-        }
+    fn metadata(&self, path: &str) -> VfsResult<VfsMetadata> {
+        self.0.metadata(path)
     }
-
-    fn exists(&self, path: &str) -> vfs::VfsResult<bool> {
-        Ok(self.lookup(path).is_ok())
+    fn exists(&self, path: &str) -> VfsResult<bool> {
+        self.0.exists(path)
     }
-
-    fn remove_file(&self, _path: &str) -> vfs::VfsResult<()> {
-        Err(VfsErrorKind::NotSupported.into())
+    fn remove_file(&self, path: &str) -> VfsResult<()> {
+        self.0.remove_file(path)
     }
-
-    fn remove_dir(&self, _path: &str) -> vfs::VfsResult<()> {
-        Err(VfsErrorKind::NotSupported.into())
-    }
-
-    fn set_creation_time(&self, _path: &str, _time: std::time::SystemTime) -> vfs::VfsResult<()> {
-        Err(VfsErrorKind::NotSupported.into())
-    }
-
-    fn set_modification_time(
-        &self,
-        _path: &str,
-        _time: std::time::SystemTime,
-    ) -> vfs::VfsResult<()> {
-        Err(VfsErrorKind::NotSupported.into())
-    }
-
-    fn set_access_time(&self, _path: &str, _time: std::time::SystemTime) -> vfs::VfsResult<()> {
-        Err(VfsErrorKind::NotSupported.into())
-    }
-
-    fn copy_file(&self, _src: &str, _dest: &str) -> vfs::VfsResult<()> {
-        Err(VfsErrorKind::NotSupported.into())
-    }
-
-    fn move_file(&self, _src: &str, _dest: &str) -> vfs::VfsResult<()> {
-        Err(VfsErrorKind::NotSupported.into())
-    }
-
-    fn move_dir(&self, _src: &str, _dest: &str) -> vfs::VfsResult<()> {
-        Err(VfsErrorKind::NotSupported.into())
+    fn remove_dir(&self, path: &str) -> VfsResult<()> {
+        self.0.remove_dir(path)
     }
 }
 
 #[cfg(feature = "async_vfs")]
-mod async_impl {
-    use super::*;
-    use async_std::io::Cursor as AsyncCursor;
-    use async_std::io::Write;
-    use async_std::stream;
-    use async_std::stream::Stream;
+const _: () = {
     use async_trait::async_trait;
-    use vfs::VfsResult;
     use vfs::async_vfs::AsyncFileSystem;
-    use vfs::async_vfs::SeekAndRead;
 
     #[async_trait]
     impl<T> AsyncFileSystem for PboVfs<T>
@@ -283,89 +243,41 @@ mod async_impl {
         async fn read_dir(
             &self,
             path: &str,
-        ) -> VfsResult<Box<dyn Unpin + Stream<Item = String> + Send>> {
-            let entry = self.lookup(path)?;
-            match entry {
-                VfsEntry::Directory { children } => {
-                    Ok(Box::new(stream::from_iter(children.clone().into_iter())))
-                }
-                VfsEntry::File { .. } => Err(VfsError::from(VfsErrorKind::NotSupported)),
-            }
+        ) -> VfsResult<Box<dyn Unpin + futures::Stream<Item = String> + Send>> {
+            self.0.read_dir(path).await
         }
-
-        async fn create_dir(&self, _path: &str) -> VfsResult<()> {
-            Err(VfsErrorKind::NotSupported.into())
+        async fn create_dir(&self, path: &str) -> VfsResult<()> {
+            self.0.create_dir(path).await
         }
-
-        async fn open_file(&self, path: &str) -> VfsResult<Box<dyn SeekAndRead + Send + Unpin>> {
-            let entry = self.lookup(path)?;
-            match entry {
-                VfsEntry::File { entry_index } => {
-                    let data = self.read_file_data(*entry_index);
-                    Ok(Box::new(AsyncCursor::new(data)))
-                }
-                VfsEntry::Directory { .. } => Err(VfsError::from(VfsErrorKind::NotSupported)),
-            }
+        async fn open_file(
+            &self,
+            path: &str,
+        ) -> VfsResult<Box<dyn vfs::async_vfs::SeekAndRead + Send + Unpin>> {
+            self.0.open_file(path).await
         }
-
-        async fn create_file(&self, _path: &str) -> VfsResult<Box<dyn Write + Send + Unpin>> {
-            Err(VfsErrorKind::NotSupported.into())
+        async fn create_file(
+            &self,
+            path: &str,
+        ) -> VfsResult<Box<dyn async_std::io::Write + Send + Unpin>> {
+            self.0.create_file(path).await
         }
-
-        async fn append_file(&self, _path: &str) -> VfsResult<Box<dyn Write + Send + Unpin>> {
-            Err(VfsErrorKind::NotSupported.into())
+        async fn append_file(
+            &self,
+            path: &str,
+        ) -> VfsResult<Box<dyn async_std::io::Write + Send + Unpin>> {
+            self.0.append_file(path).await
         }
-
         async fn metadata(&self, path: &str) -> VfsResult<VfsMetadata> {
-            <Self as vfs::FileSystem>::metadata(self, path)
+            self.0.metadata(path).await
         }
-
         async fn exists(&self, path: &str) -> VfsResult<bool> {
-            <Self as vfs::FileSystem>::exists(self, path)
+            self.0.exists(path).await
         }
-
-        async fn remove_file(&self, _path: &str) -> VfsResult<()> {
-            Err(VfsErrorKind::NotSupported.into())
+        async fn remove_file(&self, path: &str) -> VfsResult<()> {
+            self.0.remove_file(path).await
         }
-
-        async fn remove_dir(&self, _path: &str) -> VfsResult<()> {
-            Err(VfsErrorKind::NotSupported.into())
-        }
-
-        async fn set_creation_time(
-            &self,
-            _path: &str,
-            _time: std::time::SystemTime,
-        ) -> VfsResult<()> {
-            Err(VfsErrorKind::NotSupported.into())
-        }
-
-        async fn set_modification_time(
-            &self,
-            _path: &str,
-            _time: std::time::SystemTime,
-        ) -> VfsResult<()> {
-            Err(VfsErrorKind::NotSupported.into())
-        }
-
-        async fn set_access_time(
-            &self,
-            _path: &str,
-            _time: std::time::SystemTime,
-        ) -> VfsResult<()> {
-            Err(VfsErrorKind::NotSupported.into())
-        }
-
-        async fn copy_file(&self, _src: &str, _dest: &str) -> VfsResult<()> {
-            Err(VfsErrorKind::NotSupported.into())
-        }
-
-        async fn move_file(&self, _src: &str, _dest: &str) -> VfsResult<()> {
-            Err(VfsErrorKind::NotSupported.into())
-        }
-
-        async fn move_dir(&self, _src: &str, _dest: &str) -> VfsResult<()> {
-            Err(VfsErrorKind::NotSupported.into())
+        async fn remove_dir(&self, path: &str) -> VfsResult<()> {
+            self.0.remove_dir(path).await
         }
     }
-}
+};
