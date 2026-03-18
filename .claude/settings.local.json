@@ -1,0 +1,23 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__binary_ninja_mcp__search_functions_by_name",
+      "mcp__binary_ninja_mcp__list_strings_filter",
+      "mcp__binary_ninja_mcp__get_binary_status",
+      "Bash(xxd \"D:/SteamLibrary/steamapps/common/DayZ/Addons/ai.pbo\")",
+      "mcp__binary_ninja_mcp__get_xrefs_to",
+      "mcp__binary_ninja_mcp__decompile_function",
+      "Bash(xxd \"D:/SteamLibrary/steamapps/common/DayZ/Addons/ai_bliss.pbo\")",
+      "Bash(xxd \"D:/SteamLibrary/steamapps/common/DayZ/Addons/anims_cfg.pbo\")",
+      "Bash(xxd \"D:/SteamLibrary/steamapps/common/DayZ/Addons/anims_workspaces.pbo\")",
+      "Bash(cargo test:*)",
+      "Bash(cargo check:*)",
+      "Bash(cargo build:*)",
+      "Bash(cargo run:*)",
+      "Bash(target/debug/enfusion.exe list:*)",
+      "Bash(target/debug/enfusion.exe glob:*)",
+      "Bash(target/debug/enfusion.exe grep:*)",
+      "Bash(cargo clippy:*)"
+    ]
+  }
+}

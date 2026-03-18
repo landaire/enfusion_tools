@@ -65,13 +65,6 @@ impl dayz_pbo::async_pbo_vfs::AsyncReadAt for FileReference {
     }
 }
 
-/// Read the entire file contents into memory.
-pub async fn read_full_file(file_reference: &FileReference) -> Result<Vec<u8>, ()> {
-    let file = file_reference.0.inner();
-    let size = file.size() as usize;
-    read_file_slice(file_reference.clone(), 0..size).await
-}
-
 // Asynchronously read a slice from a JS File object
 async fn read_file_slice(
     file_reference: FileReference,
