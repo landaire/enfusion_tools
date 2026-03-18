@@ -44,11 +44,12 @@ impl EnfusionToolsApp {
                         && let Some(overlay_fs) = self.internal.overlay_fs.clone()
                         && let Some(task_queue) = self.internal.task_queue.as_ref()
                     {
-                        let _ = task_queue.send(crate::task::BackgroundTask::FilterPaths(
-                            Arc::clone(&self.internal.known_file_paths),
-                            overlay_fs,
-                            self.internal.file_filter.clone(),
-                        ));
+                        let _ = task_queue.send(crate::task::BackgroundTask::FilterPaths {
+                            known_paths: Arc::clone(&self.internal.known_file_paths),
+                            file_path_set: Arc::clone(&self.internal.file_path_set),
+                            root: overlay_fs,
+                            query: self.internal.file_filter.clone(),
+                        });
                     }
                 }
                 if self.internal.overlay_fs.is_some() {

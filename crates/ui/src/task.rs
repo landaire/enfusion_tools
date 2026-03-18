@@ -21,7 +21,7 @@ use enfusion_pak::vfs::async_vfs::AsyncOverlayFS;
 use enfusion_pak::vfs::async_vfs::AsyncVfsPath;
 use futures::StreamExt;
 use itertools::Itertools;
-use log::debug;
+use tracing::{debug, error, warn, info};
 
 use crate::app::KnownPaths;
 use crate::app::TreeNode;
@@ -37,6 +37,7 @@ pub struct LoadedFiles {
     pub overlay_fs: VfsPath,
     pub async_overlay_fs: AsyncVfsPath,
     pub known_paths: KnownPaths,
+    pub file_path_set: HashSet<String>,
 }
 
 #[repr(transparent)]
@@ -70,7 +71,12 @@ pub enum BackgroundTask {
     LoadPakFiles(Vec<FileReference>),
     PerformSearch(SearchId, AsyncVfsPath, String),
     LoadFileData(VfsPath, AsyncVfsPath),
-    FilterPaths(Arc<KnownPaths>, VfsPath, String),
+    FilterPaths {
+        known_paths: Arc<KnownPaths>,
+        file_path_set: Arc<HashSet<String>>,
+        root: VfsPath,
+        query: String,
+    },
     DiffBuilds {
         base: Vec<FileReference>,
         modified: Vec<FileReference>,
@@ -109,7 +115,9 @@ pub async fn perform_search(
                 if child.is_file().await.ok().unwrap_or_default() {
                     // If this file doesn't have an extension that we believe to be a text
                     // file, let's ignore it
-                    if let Some("c" | "et" | "conf" | "layout") = child.extension().as_deref() {
+                    if let Some("c" | "et" | "conf" | "layout"
+                        | "agr" | "asi" | "ast" | "asy" | "aw"
+                        | "emat" | "hpp" | "json" | "txt" | "xml") = child.extension().as_deref() {
                         file_queue.push_back(child);
                     }
                 } else {
@@ -126,7 +134,7 @@ pub async fn perform_search(
             async_std::io::copy(&mut next.open_file().await.expect("could not open"), &mut data)
                 .await
         {
-            eprintln!("Failed to read data for file {}: {:?}", next.as_str(), e);
+            error!(file = next.as_str(), ?e, "failed to read file data");
             continue;
         }
 
@@ -326,10 +334,10 @@ pub fn process_background_requests(
                     }
                 });
             }
-            BackgroundTask::FilterPaths(known_paths, root, query) => {
+            BackgroundTask::FilterPaths { known_paths, file_path_set, root, query } => {
                 let inbox = inbox.clone();
                 execute(async move {
-                    let new_tree = build_file_tree(&root, &known_paths, Some(query));
+                    let new_tree = build_file_tree(&root, &known_paths, &file_path_set, Some(query));
 
                     let _ = inbox.send(BackgroundTaskMessage::FilesFiltered(new_tree));
                 });
@@ -376,6 +384,8 @@ pub async fn read_file_data(path: AsyncVfsPath) -> Option<Vec<u8>> {
 async fn load_pak_files_from_handles(
     handles: Vec<FileReference>,
 ) -> Result<(LoadedFiles, Vec<TreeNode>), PakError> {
+    info!(count = handles.len(), "loading archive files");
+
     let mut parsed_paths = Vec::with_capacity(handles.len() + 1);
     parsed_paths.push(VfsPath::new(MemoryFS::new()));
 
@@ -400,19 +410,43 @@ async fn load_pak_files_from_handles(
         }
         #[cfg(not(target_arch = "wasm32"))]
         {
+            if !handle.has_supported_extension() {
+                warn!(path = ?handle.0, "skipping unsupported file extension");
+                continue;
+            }
+            info!(path = ?handle.0, "parsing archive file");
             let cloned = handle.clone();
-            let parsed_file = crate::pak_wrapper::parse_pak_file(cloned.0)?;
-            let vfs = PakVfs::new(Arc::new(parsed_file));
-            parsed_paths.push(VfsPath::new(vfs.clone()));
-            parsed_async_paths.push(AsyncVfsPath::new(vfs));
+            match crate::pak_wrapper::parse_archive_file(cloned.0) {
+                Ok(crate::pak_wrapper::ParsedArchive::Pak(pak)) => {
+                    info!(path = ?handle.0, "mounted PAK");
+                    let vfs = PakVfs::new(pak);
+                    parsed_paths.push(VfsPath::new(vfs.clone()));
+                    parsed_async_paths.push(AsyncVfsPath::new(vfs));
+                }
+                Ok(crate::pak_wrapper::ParsedArchive::Pbo(pbo_vfs)) => {
+                    info!(path = ?handle.0, "mounted PBO");
+                    let cloned = pbo_vfs.clone();
+                    parsed_paths.push(VfsPath::new(pbo_vfs));
+                    parsed_async_paths.push(AsyncVfsPath::new(cloned));
+                }
+                Err(e) => {
+                    error!(path = ?handle.0, ?e, "failed to parse archive file");
+                    continue;
+                }
+            }
             parsed_handles.push(handle);
         }
     }
 
+    info!(
+        vfs_count = parsed_paths.len() - 1,
+        "building overlay filesystem"
+    );
     let overlay_fs = VfsPath::new(OverlayFS::new(&parsed_paths));
     let async_overlay_fs = AsyncVfsPath::new(AsyncOverlayFS::new(&parsed_async_paths));
 
     let mut known_paths = HashMap::new();
+    let mut file_path_set = HashSet::new();
     let mut queue = vec![overlay_fs.clone()];
 
     while let Some(next) = queue.pop() {
@@ -424,6 +458,8 @@ async fn load_pak_files_from_handles(
         }
 
         let Ok(reader) = next.read_dir() else {
+            // Not a directory → it's a file
+            file_path_set.insert(next.as_str().to_string());
             continue;
         };
         for child in reader {
@@ -431,7 +467,9 @@ async fn load_pak_files_from_handles(
         }
     }
 
-    let file_tree = build_file_tree(&overlay_fs, &known_paths, None);
+    info!(known_paths = known_paths.len(), files = file_path_set.len(), "crawled filesystem");
+    let file_tree = build_file_tree(&overlay_fs, &known_paths, &file_path_set, None);
+    info!(tree_nodes = file_tree.len(), "built file tree");
 
     Ok((
         LoadedFiles {
@@ -439,6 +477,7 @@ async fn load_pak_files_from_handles(
             overlay_fs,
             async_overlay_fs,
             known_paths,
+            file_path_set,
         },
         file_tree,
     ))
@@ -469,6 +508,7 @@ pub fn ascii_icontains(needle: &str, haystack: &str) -> bool {
 fn build_file_tree(
     path: &VfsPath,
     known_files: &HashMap<(FullPath, FileName), VfsPath>,
+    is_file_cache: &HashSet<String>,
     filter: Option<String>,
 ) -> Vec<TreeNode> {
     // Build the file tree that will be displayed
@@ -482,17 +522,11 @@ fn build_file_tree(
     // 3. Using the results from #1 in the tree loop, check to see if the path is a parent
     // or descendent of a filtered tree.
 
-    let mut is_file_cache = HashSet::new();
-
     let filtered_files = {
         let query_has_path = filter.as_ref().map(|f| f.contains('/')).unwrap_or_default();
         let mut filtered_files = Vec::new();
 
         for ((FullPath(full_path), FileName(file_name)), vfs_path) in known_files.iter() {
-            if vfs_path.is_file().unwrap_or_default() {
-                is_file_cache.insert(vfs_path.as_str());
-            }
-
             let haystack = if query_has_path { full_path.as_str() } else { file_name.as_str() };
 
             if let Some(query) = filter.as_ref()

@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::sync::mpsc;
 
@@ -8,7 +9,7 @@ use egui_dock::Style;
 use egui_ltreeview::TreeViewState;
 use enfusion_pak::vfs::VfsPath;
 use enfusion_pak::vfs::async_vfs::AsyncVfsPath;
-use log::debug;
+use tracing::{debug, error};
 
 use crate::task::BackgroundTask;
 use crate::task::BackgroundTaskMessage;
@@ -45,6 +46,7 @@ pub(crate) struct AppInternalData {
     pub(crate) overlay_fs: Option<VfsPath>,
     pub(crate) async_overlay_fs: Option<AsyncVfsPath>,
     pub(crate) known_file_paths: Arc<KnownPaths>,
+    pub(crate) file_path_set: Arc<HashSet<String>>,
 
     pub(crate) opened_file_text: String,
     pub(crate) file_filter: String,
@@ -93,6 +95,7 @@ impl Default for EnfusionToolsApp {
                 opened_file_text: "".to_string(),
                 file_filter: "".to_string(),
                 known_file_paths: Default::default(),
+                file_path_set: Default::default(),
                 next_search_query_id: SearchId(0),
                 tree_view_state: TreeViewState::default(),
                 tree: Default::default(),
@@ -129,8 +132,9 @@ impl EnfusionToolsApp {
                 let mut pak_file_paths = Vec::new();
                 for file in &app.file_paths {
                     let path = std::path::PathBuf::from(file);
-                    if path.exists() {
-                        pak_file_paths.push(FileReference(path));
+                    let file_ref = FileReference(path);
+                    if file_ref.0.exists() && file_ref.has_supported_extension() {
+                        pak_file_paths.push(file_ref);
                     }
                 }
 
@@ -161,6 +165,7 @@ impl EnfusionToolsApp {
                     }
 
                     self.internal.known_file_paths = Arc::new(loaded_files.known_paths);
+                    self.internal.file_path_set = Arc::new(loaded_files.file_path_set);
 
                     self.internal.overlay_fs = Some(loaded_files.overlay_fs);
                     self.internal.async_overlay_fs = Some(loaded_files.async_overlay_fs);
@@ -175,7 +180,7 @@ impl EnfusionToolsApp {
                     self.internal.open_nodes.push(true);
                 }
                 Err(e) => {
-                    eprintln!("failed to load pak files: {e:?}");
+                    error!(?e, "failed to load files");
                 }
             },
             BackgroundTaskMessage::SearchResult(search_id, search_result) => {
@@ -219,7 +224,7 @@ impl EnfusionToolsApp {
                     }));
                 }
                 Err(e) => {
-                    eprintln!("failed to load pak files: {e:?}");
+                    error!(?e, "failed to load files");
                 }
             },
         }
@@ -287,8 +292,12 @@ impl eframe::App for EnfusionToolsApp {
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.vertical(|ui| {
                 ui.horizontal(|ui| {
-                    if ui.button("Open PAK Files").clicked() {
-                        let task = rfd::AsyncFileDialog::new().pick_files();
+                    if ui.button("Open Files").clicked() {
+                        let task = rfd::AsyncFileDialog::new()
+                            .add_filter("Supported archives", &["pak", "pbo"])
+                            .add_filter("PAK files", &["pak"])
+                            .add_filter("PBO files", &["pbo"])
+                            .pick_files();
                         if let Some(background_task_sender) = self.internal.task_queue.clone() {
                             execute(async move {
                                 let file = task.await;
@@ -296,7 +305,11 @@ impl eframe::App for EnfusionToolsApp {
                                     #[cfg(target_arch = "wasm32")]
                                     let _ =
                                         background_task_sender.send(BackgroundTask::LoadPakFiles(
-                                            files.drain(..).map(FileReference).collect(),
+                                            files
+                                                .drain(..)
+                                                .map(FileReference)
+                                                .filter(|f| f.has_supported_extension())
+                                                .collect(),
                                         ));
 
                                     #[cfg(not(target_arch = "wasm32"))]
@@ -307,6 +320,7 @@ impl eframe::App for EnfusionToolsApp {
                                                 .map(|handle| {
                                                     FileReference(handle.path().to_owned())
                                                 })
+                                                .filter(|f| f.has_supported_extension())
                                                 .collect(),
                                         ));
                                 }

@@ -13,6 +13,15 @@ use memmap2::Mmap;
 #[derive(Clone, Debug)]
 pub struct FileReference(pub std::path::PathBuf);
 
+impl FileReference {
+    pub fn has_supported_extension(&self) -> bool {
+        matches!(
+            self.0.extension().and_then(|e| e.to_str()),
+            Some("pak" | "pbo")
+        )
+    }
+}
+
 #[derive(Debug, Clone)]
 #[repr(transparent)]
 pub struct MmapWrapper(Arc<Mmap>);
@@ -46,4 +55,33 @@ pub fn parse_pak_file(path: PathBuf) -> Result<BytesPakFileWrapper<MmapWrapper>,
     let parsed_pak = enfusion_pak::PakFile::parse(&mmap)?;
 
     Ok(BytesPakFileWrapper::new(path, MmapWrapper(Arc::new(mmap)), parsed_pak))
+}
+
+/// Represents a parsed archive file — either a PAK or PBO — that can be
+/// mounted as a VFS.
+pub enum ParsedArchive {
+    Pak(Arc<BytesPakFileWrapper<MmapWrapper>>),
+    Pbo(dayz_pbo::pbo_vfs::PboVfs<Vec<u8>>),
+}
+
+pub fn parse_archive_file(path: PathBuf) -> Result<ParsedArchive, PakError> {
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+
+    match ext.as_str() {
+        "pbo" => {
+            let data = std::fs::read(&path).map_err(PakError::IoError)?;
+            let pbo = dayz_pbo::PboFile::parse(&data)
+                .map_err(|e| PakError::IoError(std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string())))?;
+            let vfs = dayz_pbo::pbo_vfs::PboVfs::new(data, pbo);
+            Ok(ParsedArchive::Pbo(vfs))
+        }
+        _ => {
+            let pak = parse_pak_file(path)?;
+            Ok(ParsedArchive::Pak(Arc::new(pak)))
+        }
+    }
 }

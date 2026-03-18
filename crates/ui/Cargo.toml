@@ -24,7 +24,7 @@ eframe = { version = "0.32", default-features = false, features = [
     "wayland",       # To support Linux (and CI)
     "x11",           # To support older Linux distributions (restores one of the default features)
 ] }
-log = "0.4.27"
+tracing = "0.1"
 
 # You only need serde if you want app persistence:
 serde = { version = "1.0.219", features = ["derive"] }
@@ -33,6 +33,9 @@ egui_inbox = "0.9.0"
 enfusion_pak = { version = "*", path = "../enfusion_pak", features = [
     "async_vfs",
     "arc",
+] }
+dayz_pbo = { version = "*", path = "../dayz_pbo", features = [
+    "async_vfs",
 ] }
 itertools = "0.14.0"
 egui_code_editor = "0.2.17"
@@ -48,7 +51,7 @@ similar = "2.7.0"
 
 # native:
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-env_logger = "0.11.8"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 memmap2 = "0.9.5"
 
 # web:

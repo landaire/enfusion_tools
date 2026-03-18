@@ -13,6 +13,13 @@ use crate::task::execute;
 #[derive(Clone, Debug)]
 pub struct FileReference(pub rfd::FileHandle);
 
+impl FileReference {
+    pub fn has_supported_extension(&self) -> bool {
+        let name = self.0.file_name();
+        name.ends_with(".pak") || name.ends_with(".pbo")
+    }
+}
+
 unsafe impl Send for FileReference {}
 unsafe impl Sync for FileReference {}
 
