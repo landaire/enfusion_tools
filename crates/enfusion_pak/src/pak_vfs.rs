@@ -40,21 +40,18 @@ where
     ///
     /// # Examples
     ///
-    /// ```
-    /// use std::path::PathBuf;
+    /// ```no_run
+    /// use std::sync::Arc;
     /// use enfusion_pak::PakFile;
     /// use enfusion_pak::pak_vfs::PakVfs;
-    /// use enfusion_pak::error::PakError;
+    /// use enfusion_pak::wrappers::sync_reader::CachingPakFileWrapper;
     ///
-    /// fn parse_pak_file(path: PathBuf) -> Result<PakFile, PakError> {
-    ///     let file = std::fs::File::open(&path)?;
-    ///     let mmap = unsafe { memmap2::Mmap::map(&file)? };
-    ///
-    ///     PakFile::parse(&mmap)
-    /// }
-    ///
-    /// let parsed_file = parse_pak_file()?;
-    /// let vfs = PakVfs::new(Arc::new(parsed_file));
+    /// let path = std::path::PathBuf::from("example.pak");
+    /// let file = std::fs::File::open(&path).unwrap();
+    /// let mmap = unsafe { memmap2::Mmap::map(&file).unwrap() };
+    /// let parsed_file = PakFile::parse(&mmap).unwrap();
+    /// let wrapper = CachingPakFileWrapper::new(path, file, parsed_file);
+    /// let vfs = PakVfs::new(Arc::new(wrapper));
     /// ```
     pub fn new(source: T) -> Self {
         // Generate the cache

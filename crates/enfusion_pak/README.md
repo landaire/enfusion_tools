@@ -34,7 +34,7 @@ cargo add enfusion_pak
 
 There is currently one example of how to use this library, provided in [`examples/dump_file`](examples/dump_file). After cloning the repo you can run it from the root repo directory with:
 
-```
+```sh
 cargo run --release --example dump_file -- ARMA_DATA_FILES_DIR /scripts/Game/Campaign/
 ```
 
