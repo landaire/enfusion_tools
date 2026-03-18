@@ -12,4 +12,4 @@ fskit = "0.2.0"
 # egui_ltreeview = { path = "/Users/lander/src/egui_ltreeview" }
 vfs = { git = "https://github.com/landaire/rust-vfs.git", branch = "push-pkquslyvkqot" }
 #vfs = { version = "0.12.1", path = "../../src/rust-vfs" }
-fskit = { path = "C:/Users/lander/AppData/Local/Temp/fskit-updated" }
+#fskit = { path = "G:/dev/fskit" }
