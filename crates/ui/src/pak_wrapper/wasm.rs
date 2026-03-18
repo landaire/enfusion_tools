@@ -45,6 +45,33 @@ impl AsyncReadAt for FileReference {
     }
 }
 
+#[async_trait]
+impl dayz_pbo::async_pbo_vfs::AsyncReadAt for FileReference {
+    async fn read_at(
+        &self,
+        file_range: std::ops::Range<usize>,
+    ) -> Result<impl AsRef<[u8]>, VfsError> {
+        let (tx, rx) = oneshot::channel();
+        let handle = self.clone();
+
+        execute(async move {
+            let data = read_file_slice(handle, file_range).await.expect("failed to read buffer");
+            let _ = tx.send(data);
+        });
+
+        let data = rx.await.expect("failed to receive buffer");
+
+        Ok(data)
+    }
+}
+
+/// Read the entire file contents into memory.
+pub async fn read_full_file(file_reference: &FileReference) -> Result<Vec<u8>, ()> {
+    let file = file_reference.0.inner();
+    let size = file.size() as usize;
+    read_file_slice(file_reference.clone(), 0..size).await
+}
+
 // Asynchronously read a slice from a JS File object
 async fn read_file_slice(
     file_reference: FileReference,

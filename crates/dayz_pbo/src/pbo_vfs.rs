@@ -11,7 +11,7 @@ use crate::PboFile;
 
 /// A VFS entry in the synthetic directory tree.
 #[derive(Debug, Clone)]
-enum VfsEntry {
+pub(crate) enum VfsEntry {
     Directory {
         children: Vec<String>,
     },
@@ -54,7 +54,7 @@ where
     pub fn new(source: T, pbo: PboFile) -> Self {
         let prefix = pbo.extensions.get("prefix").map(|p| p.replace('\\', "/")).unwrap_or_default();
 
-        let entries = Self::build_entries(&pbo, &prefix);
+        let entries = build_entries(&pbo, &prefix);
 
         Self { inner: Arc::new(PboVfsInner { source, pbo, entries }) }
     }
@@ -63,83 +63,85 @@ where
     pub fn pbo(&self) -> &PboFile {
         &self.inner.pbo
     }
+}
 
-    fn build_entries(pbo: &PboFile, prefix: &str) -> HashMap<String, VfsEntry> {
-        let mut entries: HashMap<String, VfsEntry> = HashMap::new();
+/// Build the VFS entry map from a parsed PBO header.
+///
+/// If `prefix` is non-empty, all file paths are rooted under that prefix.
+pub(crate) fn build_entries(pbo: &PboFile, prefix: &str) -> HashMap<String, VfsEntry> {
+    let mut entries: HashMap<String, VfsEntry> = HashMap::new();
 
-        // Seed the root directory.
-        entries.insert(String::new(), VfsEntry::Directory { children: Vec::new() });
+    // Seed the root directory.
+    entries.insert(String::new(), VfsEntry::Directory { children: Vec::new() });
 
-        // Create intermediate directories for the prefix itself (e.g. "DZ" then "DZ/AI").
-        if !prefix.is_empty() {
-            let prefix_parts: Vec<&str> = prefix.split('/').collect();
-            for depth in 0..prefix_parts.len() {
-                let parent_path =
-                    if depth == 0 { String::new() } else { prefix_parts[..depth].join("/") };
-                let child_name = prefix_parts[depth];
-                let child_path = if parent_path.is_empty() {
-                    child_name.to_string()
-                } else {
-                    format!("{parent_path}/{child_name}")
-                };
+    // Create intermediate directories for the prefix itself (e.g. "DZ" then "DZ/AI").
+    if !prefix.is_empty() {
+        let prefix_parts: Vec<&str> = prefix.split('/').collect();
+        for depth in 0..prefix_parts.len() {
+            let parent_path =
+                if depth == 0 { String::new() } else { prefix_parts[..depth].join("/") };
+            let child_name = prefix_parts[depth];
+            let child_path = if parent_path.is_empty() {
+                child_name.to_string()
+            } else {
+                format!("{parent_path}/{child_name}")
+            };
 
-                let parent = entries
-                    .entry(parent_path)
-                    .or_insert_with(|| VfsEntry::Directory { children: Vec::new() });
-                if let VfsEntry::Directory { children } = parent
-                    && !children.contains(&child_name.to_string())
-                {
-                    children.push(child_name.to_string());
-                }
+            let parent = entries
+                .entry(parent_path)
+                .or_insert_with(|| VfsEntry::Directory { children: Vec::new() });
+            if let VfsEntry::Directory { children } = parent
+                && !children.contains(&child_name.to_string())
+            {
+                children.push(child_name.to_string());
+            }
 
+            entries
+                .entry(child_path)
+                .or_insert_with(|| VfsEntry::Directory { children: Vec::new() });
+        }
+    }
+
+    for (idx, header) in pbo.entries.iter().enumerate() {
+        // PBO paths use backslashes; normalise to forward slashes for VFS.
+        let relative = header.filename.replace('\\', "/");
+
+        // Prepend the prefix to get the full VFS path.
+        let full_path = if prefix.is_empty() { relative } else { format!("{prefix}/{relative}") };
+
+        // Register the file leaf.
+        entries.insert(full_path.clone(), VfsEntry::File { entry_index: idx });
+
+        // Ensure every ancestor directory exists and lists its children.
+        let parts: Vec<&str> = full_path.split('/').collect();
+        for depth in 0..parts.len() {
+            let parent_path = if depth == 0 { String::new() } else { parts[..depth].join("/") };
+            let child_name = parts[depth];
+            let child_path = if parent_path.is_empty() {
+                child_name.to_string()
+            } else {
+                format!("{parent_path}/{child_name}")
+            };
+
+            let parent = entries
+                .entry(parent_path)
+                .or_insert_with(|| VfsEntry::Directory { children: Vec::new() });
+
+            if let VfsEntry::Directory { children } = parent
+                && !children.contains(&child_name.to_string())
+            {
+                children.push(child_name.to_string());
+            }
+
+            if depth < parts.len() - 1 {
                 entries
                     .entry(child_path)
                     .or_insert_with(|| VfsEntry::Directory { children: Vec::new() });
             }
         }
-
-        for (idx, header) in pbo.entries.iter().enumerate() {
-            // PBO paths use backslashes; normalise to forward slashes for VFS.
-            let relative = header.filename.replace('\\', "/");
-
-            // Prepend the prefix to get the full VFS path.
-            let full_path =
-                if prefix.is_empty() { relative } else { format!("{prefix}/{relative}") };
-
-            // Register the file leaf.
-            entries.insert(full_path.clone(), VfsEntry::File { entry_index: idx });
-
-            // Ensure every ancestor directory exists and lists its children.
-            let parts: Vec<&str> = full_path.split('/').collect();
-            for depth in 0..parts.len() {
-                let parent_path = if depth == 0 { String::new() } else { parts[..depth].join("/") };
-                let child_name = parts[depth];
-                let child_path = if parent_path.is_empty() {
-                    child_name.to_string()
-                } else {
-                    format!("{parent_path}/{child_name}")
-                };
-
-                let parent = entries
-                    .entry(parent_path)
-                    .or_insert_with(|| VfsEntry::Directory { children: Vec::new() });
-
-                if let VfsEntry::Directory { children } = parent
-                    && !children.contains(&child_name.to_string())
-                {
-                    children.push(child_name.to_string());
-                }
-
-                if depth < parts.len() - 1 {
-                    entries
-                        .entry(child_path)
-                        .or_insert_with(|| VfsEntry::Directory { children: Vec::new() });
-                }
-            }
-        }
-
-        entries
     }
+
+    entries
 }
 
 impl<T> PboVfs<T>

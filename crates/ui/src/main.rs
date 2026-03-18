@@ -32,9 +32,18 @@ fn main() -> eframe::Result {
 #[cfg(target_arch = "wasm32")]
 fn main() {
     use eframe::wasm_bindgen::JsCast as _;
+    use tracing_subscriber::layer::SubscriberExt as _;
+    use tracing_subscriber::util::SubscriberInitExt as _;
 
-    // Redirect `log` message to `console.log` and friends:
-    eframe::WebLogger::init(log::LevelFilter::Debug).ok();
+    tracing_subscriber::registry()
+        .with(tracing::level_filters::LevelFilter::DEBUG)
+        .with(
+            tracing_subscriber::fmt::layer()
+                .with_ansi(false)
+                .without_time()
+                .with_writer(tracing_web::MakeConsoleWriter),
+        )
+        .init();
 
     let web_options = eframe::WebOptions::default();
 

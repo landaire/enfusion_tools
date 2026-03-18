@@ -198,7 +198,7 @@ fn expand_inputs(paths: &[PathBuf]) -> Vec<PathBuf> {
     result
 }
 
-fn is_supported(path: &PathBuf) -> bool {
+fn is_supported(path: &std::path::Path) -> bool {
     matches!(path.extension().and_then(OsStr::to_str), Some("pak" | "pbo"))
 }
 
@@ -351,6 +351,7 @@ fn cmd_list(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn cmd_grep(
     root: &VfsPath,
     file_set: &HashSet<String>,
@@ -441,6 +442,7 @@ fn cmd_grep(
                     println!("--");
                 }
 
+                #[allow(clippy::needless_range_loop)]
                 for i in ctx_start..ctx_end {
                     if let Some(last) = last_printed_line
                         && i <= last

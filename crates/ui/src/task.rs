@@ -24,6 +24,7 @@ use itertools::Itertools;
 use tracing::debug;
 use tracing::error;
 use tracing::info;
+#[cfg(not(target_arch = "wasm32"))]
 use tracing::warn;
 
 use crate::app::KnownPaths;
@@ -402,16 +403,42 @@ async fn load_pak_files_from_handles(
     for handle in handles {
         #[cfg(target_arch = "wasm32")]
         {
-            let cloned = handle.clone();
-            let parsed_file = enfusion_pak::wrappers::async_reader::parse_pak_file(
-                cloned.0.file_name().into(),
-                cloned,
-            )
-            .await
-            .expect("failed to parse pak file");
-            let vfs = PakVfs::new(Arc::new(parsed_file));
-            parsed_paths.push(VfsPath::new(vfs.clone()));
-            parsed_async_paths.push(AsyncVfsPath::new(vfs));
+            if !handle.has_supported_extension() {
+                continue;
+            }
+            let name = handle.0.file_name();
+            let is_pbo = name.ends_with(".pbo");
+
+            if is_pbo {
+                match dayz_pbo::wrappers::parse_pbo_file(handle.clone()).await {
+                    Ok(vfs) => {
+                        parsed_paths.push(VfsPath::new(vfs.clone()));
+                        parsed_async_paths.push(AsyncVfsPath::new(vfs));
+                    }
+                    Err(e) => {
+                        error!(file = %name, ?e, "failed to parse PBO");
+                        continue;
+                    }
+                }
+            } else {
+                let cloned = handle.clone();
+                match enfusion_pak::wrappers::async_reader::parse_pak_file(
+                    cloned.0.file_name().into(),
+                    cloned,
+                )
+                .await
+                {
+                    Ok(parsed_file) => {
+                        let vfs = PakVfs::new(Arc::new(parsed_file));
+                        parsed_paths.push(VfsPath::new(vfs.clone()));
+                        parsed_async_paths.push(AsyncVfsPath::new(vfs));
+                    }
+                    Err(e) => {
+                        error!(file = %name, ?e, "failed to parse PAK");
+                        continue;
+                    }
+                }
+            }
             parsed_handles.push(handle);
         }
         #[cfg(not(target_arch = "wasm32"))]

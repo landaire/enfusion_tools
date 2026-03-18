@@ -39,6 +39,16 @@ impl ReadAt for MmapWrapper {
     }
 }
 
+#[async_trait]
+impl dayz_pbo::async_pbo_vfs::AsyncReadAt for MmapWrapper {
+    async fn read_at(
+        &self,
+        file_range: std::ops::Range<usize>,
+    ) -> Result<impl AsRef<[u8]>, VfsError> {
+        Ok(&self.0[file_range])
+    }
+}
+
 impl AsRef<[u8]> for MmapWrapper {
     fn as_ref(&self) -> &[u8] {
         &self.0
