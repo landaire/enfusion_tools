@@ -10,13 +10,12 @@ use std::sync::atomic::Ordering;
 use std::sync::mpsc;
 use std::sync::mpsc::Receiver;
 
+use dayz_pbo::fskit;
 use egui_inbox::UiInboxSender;
 use enfusion_pak::error::PakError;
 use enfusion_pak::pak_vfs::PakVfs;
-use enfusion_pak::vfs::MemoryFS;
 use enfusion_pak::vfs::OverlayFS;
 use enfusion_pak::vfs::VfsPath;
-use enfusion_pak::vfs::async_vfs::AsyncMemoryFS;
 use enfusion_pak::vfs::async_vfs::AsyncOverlayFS;
 use enfusion_pak::vfs::async_vfs::AsyncVfsPath;
 use futures::StreamExt;
@@ -42,6 +41,53 @@ pub struct LoadedFiles {
     pub async_overlay_fs: AsyncVfsPath,
     pub known_paths: KnownPaths,
     pub file_path_set: HashSet<String>,
+}
+
+/// Metadata for [`empty_layer`]. The tree never contains a file, so this is
+/// only here to satisfy the `Metadata` bound.
+#[derive(Debug, Clone, Copy)]
+struct EmptyMeta;
+
+impl fskit::Metadata for EmptyMeta {
+    fn len(&self) -> u64 {
+        0
+    }
+}
+
+/// Opener for [`empty_layer`]. Unreachable: there is nothing to open.
+#[derive(Debug, Clone, Copy)]
+struct EmptyOpener;
+
+impl fskit::FileOpener<EmptyMeta> for EmptyOpener {
+    fn open(
+        &self,
+        _meta: &EmptyMeta,
+    ) -> enfusion_pak::vfs::VfsResult<Box<dyn enfusion_pak::vfs::SeekAndRead + Send>> {
+        Err(enfusion_pak::vfs::error::VfsErrorKind::FileNotFound.into())
+    }
+}
+
+impl fskit::AsyncFileOpener<EmptyMeta> for EmptyOpener {
+    fn open_async(
+        &self,
+        _meta: &EmptyMeta,
+    ) -> enfusion_pak::vfs::VfsResult<
+        Box<dyn enfusion_pak::vfs::async_vfs::SeekAndRead + Send + Unpin>,
+    > {
+        Err(enfusion_pak::vfs::error::VfsErrorKind::FileNotFound.into())
+    }
+}
+
+/// Base layer for the overlay filesystem: permanently empty and read-only.
+///
+/// `OverlayFS` treats layer 0 as its write layer and requires at least one
+/// layer to exist, but this app only ever reads. `vfs::MemoryFS` used to fill
+/// this role; its constructor stamps the root directory with
+/// `SystemTime::now()`, which panics on `wasm32-unknown-unknown` with "time not
+/// implemented on this platform". That killed every archive load in the browser
+/// before it got as far as parsing an archive.
+fn empty_layer() -> fskit::ReadOnlyVfs<EmptyMeta, EmptyOpener> {
+    fskit::ReadOnlyVfs::new(fskit::VfsTreeBuilder::new().build(), EmptyOpener)
 }
 
 #[repr(transparent)]
@@ -402,10 +448,10 @@ async fn load_pak_files_from_handles(
     info!(count = handles.len(), "loading archive files");
 
     let mut parsed_paths = Vec::with_capacity(handles.len() + 1);
-    parsed_paths.push(VfsPath::new(MemoryFS::new()));
+    parsed_paths.push(VfsPath::new(empty_layer()));
 
     let mut parsed_async_paths = Vec::with_capacity(handles.len() + 1);
-    parsed_async_paths.push(AsyncVfsPath::new(AsyncMemoryFS::new()));
+    parsed_async_paths.push(AsyncVfsPath::new(empty_layer()));
 
     let mut parsed_handles = Vec::with_capacity(handles.len());
     for handle in handles {
@@ -655,4 +701,49 @@ pub fn execute<F: Future<Output = ()> + Send + 'static>(f: F) {
 #[cfg(target_arch = "wasm32")]
 pub fn execute<F: Future<Output = ()> + 'static>(f: F) {
     wasm_bindgen_futures::spawn_local(f);
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::Read;
+    use std::io::Write;
+
+    use enfusion_pak::vfs::MemoryFS;
+
+    use super::*;
+
+    #[test]
+    fn empty_layer_has_a_readable_empty_root() {
+        let root = VfsPath::new(empty_layer());
+        assert!(root.exists().expect("root should be queryable"));
+        assert_eq!(root.read_dir().expect("root should be a directory").count(), 0);
+    }
+
+    /// The overlay must read through to the lower layers when layer 0 is the
+    /// empty base. This is the behaviour `MemoryFS` used to provide before it
+    /// was swapped out for being unusable on wasm.
+    #[test]
+    fn overlay_reads_through_empty_base_layer() {
+        let lower = VfsPath::new(MemoryFS::new());
+        lower
+            .join("hello.txt")
+            .unwrap()
+            .create_file()
+            .unwrap()
+            .write_all(b"data")
+            .expect("write to lower layer");
+
+        let overlay = VfsPath::new(OverlayFS::new(&[VfsPath::new(empty_layer()), lower]));
+
+        let mut contents = String::new();
+        overlay
+            .join("hello.txt")
+            .unwrap()
+            .open_file()
+            .expect("file should resolve through the empty base layer")
+            .read_to_string(&mut contents)
+            .unwrap();
+
+        assert_eq!(contents, "data");
+    }
 }
